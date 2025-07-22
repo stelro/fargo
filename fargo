@@ -1,0 +1,1224 @@
+#!/usr/bin/env bash
+#
+# fargo - tiny C++ project bootstrap/build helper (Cargo-like)
+# ------------------------------------------------------------
+#
+# Author: Rostislav Stelmach <stelmach.ro@gmail.com>
+# Repository: https://github.com/stelro/fargo
+# License: MIT
+#
+# Requirements: bash 4+, cmake 3.18+, a C++ compiler (g++/clang++), and make or ninja.
+# GoogleTest is fetched automatically via CMake's FetchContent when you use `fargo new`.
+#
+set -euo pipefail
+
+FARGO_VERSION="0.1.0"
+
+# ---------- Configuration ----------
+BUILD_DIR="build"
+
+DEBUG_SUBDIR="debug"
+RELEASE_SUBDIR="release"
+ASAN_SUBDIR="debug_asan"
+TSAN_SUBDIR="debug_tsan"
+
+# Configuration profiles
+PROFILE_DIR=".fargo"
+PROFILES_DIR="$PROFILE_DIR/profiles"
+DEFAULT_PROFILE="default"
+
+SRC_DIR="src"
+TEST_DIR="test"
+BENCH_DIR="bench"
+MAIN_FILE="main.cpp"
+TEST_FILE="example_test.cpp"
+BENCH_FILE="example_bench.cpp"
+CMAKELISTS_FILE="CMakeLists.txt"
+
+# Global verbose flag and current profile
+VERBOSE=false
+CURRENT_PROFILE="$DEFAULT_PROFILE"
+
+# ---------- Colors / Logging ----------
+if [[ -t 1 ]]; then
+
+  t_bold=$(tput bold); t_red=$(tput setaf 1); t_green=$(tput setaf 2)
+  t_yellow=$(tput setaf 3); t_blue=$(tput setaf 4); t_reset=$(tput sgr0)
+else
+  t_bold=""; t_red=""; t_green=""; t_yellow=""; t_blue=""; t_reset=""
+fi
+
+log()       { echo -e "${t_blue}[fargo]${t_reset} $*"; }
+ok()        { echo -e "${t_green}✔ ${t_reset} $*"; }
+warn()      { echo -e "${t_yellow}⚠ ${t_reset} $*"; }
+err()       { echo -e "${t_red}✖ ${t_reset} $*" >&2; }
+die()       { err "$@"; exit 1; }
+
+# ---------- Utils ----------
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command '$1' not found. Please install it."
+}
+
+# Parse profile flag separately to avoid subshell issues
+parse_profile_flag() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -p|--profile)
+        shift
+        CURRENT_PROFILE="$1"
+        ;;
+    esac
+    shift
+  done
+}
+
+# Parse verbose flags and other arguments (excluding profile which is handled separately)
+parse_flags() {
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -v|--verbose)
+        VERBOSE=true
+        ;;
+      -p|--profile)
+        shift # Skip profile flag and value as it's handled separately
+        ;;
+      *)
+        args+=("$1")
+        ;;
+    esac
+    shift
+  done
+  printf '%s\n' "${args[@]}"
+}
+
+# Load profile configuration
+load_profile() {
+  local profile_name="${1:-$DEFAULT_PROFILE}"
+  local profile_file="$PROFILES_DIR/$profile_name.conf"
+  
+  if [[ -f "$profile_file" ]]; then
+    log "Loading profile: $profile_name"
+    source "$profile_file"
+  elif [[ "$profile_name" != "$DEFAULT_PROFILE" ]]; then
+    warn "Profile '$profile_name' not found, using defaults"
+  fi
+}
+
+# Create default profile configuration
+create_default_profile() {
+  local profile_dir="$1"
+  mkdir -p "$profile_dir"
+  
+  cat > "$profile_dir/$DEFAULT_PROFILE.conf" <<EOF
+# Default fargo profile configuration
+# Override these values in custom profiles
+
+# Build configuration
+CMAKE_GENERATOR="Ninja"
+CMAKE_CXX_STANDARD="20"
+CMAKE_BUILD_TYPE_DEBUG="Debug"
+CMAKE_BUILD_TYPE_RELEASE="Release"
+
+# Compiler flags
+CXX_FLAGS_DEBUG="-Wall -Wextra -g"
+CXX_FLAGS_RELEASE="-O3 -DNDEBUG"
+
+# Additional CMake options
+CMAKE_EXTRA_OPTIONS=""
+
+# Test configuration
+TEST_PARALLEL_JOBS="auto"
+TEST_OUTPUT_ON_FAILURE="ON"
+
+# Benchmark configuration
+BENCH_MIN_TIME="1"
+BENCH_REPETITIONS="3"
+
+# Documentation
+DOC_EXTRACT_ALL="YES"
+DOC_GENERATE_CALL_GRAPH="YES"
+
+# Static analysis
+STATIC_ANALYSIS_SEVERITY="warning"
+EOF
+}
+
+# Get list of available targets from CMakeLists.txt
+get_available_targets() {
+  local root
+  root="$(project_root)" || return 1
+  
+  if [[ ! -f "$root/$CMAKELISTS_FILE" ]]; then
+    return 1
+  fi
+  
+  # Extract executable targets from CMakeLists.txt
+  grep -E "add_executable\s*\(" "$root/$CMAKELISTS_FILE" | \
+    sed -E 's/.*add_executable\s*\(\s*([^[:space:]]+).*/\1/' | \
+    grep -v '${PROJECT_NAME}' || true
+}
+
+project_root() {
+  # Walk up until we see a CMakeLists.txt that contains 'project(' and 'enable_testing(' – rough heuristic.
+  local dir="$PWD"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/$CMAKELISTS_FILE" ]]; then
+      if grep -q "project(" "$dir/$CMAKELISTS_FILE"; then
+        echo "$dir"; return 0
+      fi
+
+    fi
+    dir="$(dirname "$dir")"
+  done
+
+  return 1
+}
+
+# ---------- Templates ----------
+write_cmakelists() {
+  local project_name="$1"
+  cat > "$CMAKELISTS_FILE" <<'EOF'
+cmake_minimum_required(VERSION 3.18)
+
+# ---- Project ----
+project(PROJECT_NAME_PLACEHOLDER VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)  # Generate compile_commands.json for static analysis
+
+# ---- Build Configuration ----
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug)
+endif()
+
+# ---- Source Files ----
+file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.cxx" "src/*.cc")
+file(GLOB_RECURSE HEADERS "src/*.h" "src/*.hpp" "src/*.hxx")
+
+# ---- Main Executable ----
+add_executable(${PROJECT_NAME} src/main.cpp)
+
+# ---- Library (if you have multiple source files) ----
+# Uncomment and modify as needed:
+# add_library(${PROJECT_NAME}_lib ${SOURCES})
+# target_include_directories(${PROJECT_NAME}_lib PUBLIC src)
+# target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}_lib)
+
+# ---- Tests ----
+include(CTest)
+enable_testing()
+
+# Fetch GoogleTest
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/archive/refs/tags/v1.15.0.zip
+  DOWNLOAD_EXTRACT_TIMESTAMP true
+)
+# For Windows: Prevent overriding the parent project's compiler/linker settings
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+# Test executable
+file(GLOB_RECURSE TEST_SOURCES "test/*.cpp" "test/*.cxx" "test/*.cc")
+add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES})
+target_link_libraries(${PROJECT_NAME}_tests gtest_main)
+target_include_directories(${PROJECT_NAME}_tests PRIVATE src)
+
+add_test(NAME ${PROJECT_NAME}_tests COMMAND ${PROJECT_NAME}_tests)
+
+# ---- Benchmarks ----
+# Fetch Google Benchmark
+FetchContent_Declare(
+  googlebenchmark
+  URL https://github.com/google/benchmark/archive/refs/tags/v1.8.3.zip
+  DOWNLOAD_EXTRACT_TIMESTAMP true
+)
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googlebenchmark)
+
+# Benchmark executable
+file(GLOB_RECURSE BENCH_SOURCES "bench/*.cpp" "bench/*.cxx" "bench/*.cc")
+add_executable(${PROJECT_NAME}_bench ${BENCH_SOURCES})
+target_link_libraries(${PROJECT_NAME}_bench benchmark::benchmark)
+target_include_directories(${PROJECT_NAME}_bench PRIVATE src)
+
+# ---- Custom Targets ----
+# Example: add more executables here
+# add_executable(${PROJECT_NAME}_tool tools/tool.cpp)
+# target_link_libraries(${PROJECT_NAME}_tool ${PROJECT_NAME}_lib)
+
+# ---- Installation ----
+install(TARGETS ${PROJECT_NAME} DESTINATION bin)
+
+# ---- Packaging ----
+set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+include(CPack)
+EOF
+  sed -i.bak "s/PROJECT_NAME_PLACEHOLDER/${project_name}/g" "$CMAKELISTS_FILE"
+  rm -f "$CMAKELISTS_FILE.bak"
+}
+
+
+write_main_cpp() {
+  mkdir -p "$SRC_DIR"
+  cat > "$SRC_DIR/$MAIN_FILE" <<'EOF'
+#include <iostream>
+
+int main() {
+    std::cout << "Hello, world!\n";
+    return 0;
+}
+EOF
+
+}
+
+
+write_test_cpp() {
+  mkdir -p "$TEST_DIR"
+  cat > "$TEST_DIR/$TEST_FILE" <<'EOF'
+#include <gtest/gtest.h>
+
+
+TEST(SampleTest, BasicAssertion) {
+    EXPECT_EQ(2 + 2, 4);
+}
+EOF
+
+}
+
+write_bench_cpp() {
+  mkdir -p "$BENCH_DIR"
+  cat > "$BENCH_DIR/$BENCH_FILE" <<'EOF'
+#include <benchmark/benchmark.h>
+#include <vector>
+#include <algorithm>
+
+// Example benchmark: sorting a vector
+static void BM_VectorSort(benchmark::State& state) {
+  for (auto _ : state) {
+    state.PauseTiming();
+    std::vector<int> data(state.range(0));
+    std::generate(data.begin(), data.end(), std::rand);
+    state.ResumeTiming();
+    
+    std::sort(data.begin(), data.end());
+  }
+  state.SetComplexityN(state.range(0));
+}
+
+BENCHMARK(BM_VectorSort)->Range(8, 8<<10)->Complexity();
+
+// Example benchmark: simple function
+static void BM_StringCreation(benchmark::State& state) {
+  for (auto _ : state) {
+    std::string empty_string;
+  }
+}
+
+BENCHMARK(BM_StringCreation);
+
+BENCHMARK_MAIN();
+EOF
+
+}
+
+
+write_gitignore() {
+  cat > ".gitignore" <<'EOF'
+/build/
+/.cmake/
+/CMakeFiles/
+/docs/
+
+/CMakeCache.txt
+*.user
+*.suo
+
+*.vcxproj*
+*.code-workspace
+*.idea
+Doxyfile.bak
+.clang-format.bak
+
+# Keep fargo configuration but ignore user-specific settings
+/.fargo/user/
+EOF
+}
+
+# ---------- Commands ----------
+cmd_new() {
+  local name="${1:-}"
+  [[ -z "$name" ]] && die "Usage: fargo new <project_name>"
+
+  [[ -d "$name" ]] && die "Directory '$name' already exists."
+
+  log "Creating new project: $name"
+  mkdir -p "$name"
+  pushd "$name" >/dev/null
+
+  write_cmakelists "$name"
+  write_main_cpp
+  write_test_cpp
+  write_bench_cpp
+  write_gitignore
+
+  # Create fargo configuration directory and default profile
+  mkdir -p "$PROFILES_DIR"
+  create_default_profile "$PROFILES_DIR"
+
+  ok "Project structure created:"
+  tree -a -I '.git' || find . -maxdepth 3 -print
+
+  popd >/dev/null
+  ok "Done. cd '$name' and start hacking!"
+}
+
+cmd_profile() {
+  local action="${1:-list}"
+  local profile_name="${2:-}"
+  
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+  
+  case "$action" in
+    list|ls)
+      if [[ -d "$PROFILES_DIR" ]]; then
+        log "Available profiles:"
+        for profile in "$PROFILES_DIR"/*.conf; do
+          if [[ -f "$profile" ]]; then
+            local name=$(basename "$profile" .conf)
+            if [[ "$name" == "$DEFAULT_PROFILE" ]]; then
+              echo "  $name (default)"
+            else
+              echo "  $name"
+            fi
+          fi
+        done
+      else
+        warn "No profiles directory found. Run 'fargo profile init' to create it."
+      fi
+      ;;
+      
+    init)
+      mkdir -p "$PROFILES_DIR"
+      create_default_profile "$PROFILES_DIR"
+      ok "Profile system initialized with default profile"
+      ;;
+      
+    new|create)
+      [[ -z "$profile_name" ]] && die "Usage: fargo profile new <profile_name>"
+      
+      mkdir -p "$PROFILES_DIR"
+      local profile_file="$PROFILES_DIR/$profile_name.conf"
+      
+      if [[ -f "$profile_file" ]]; then
+        die "Profile '$profile_name' already exists"
+      fi
+      
+      # Copy from default profile
+      local default_file="$PROFILES_DIR/$DEFAULT_PROFILE.conf"
+      if [[ -f "$default_file" ]]; then
+        cp "$default_file" "$profile_file"
+      else
+        create_default_profile "$PROFILES_DIR"
+        cp "$PROFILES_DIR/$DEFAULT_PROFILE.conf" "$profile_file"
+      fi
+      
+      # Add header comment
+      sed -i "1i# Custom profile: $profile_name" "$profile_file"
+      
+      ok "Profile '$profile_name' created. Edit $profile_file to customize."
+      ;;
+      
+    show)
+      [[ -z "$profile_name" ]] && profile_name="$DEFAULT_PROFILE"
+      local profile_file="$PROFILES_DIR/$profile_name.conf"
+      
+      if [[ -f "$profile_file" ]]; then
+        log "Profile: $profile_name"
+        cat "$profile_file"
+      else
+        die "Profile '$profile_name' not found"
+      fi
+      ;;
+      
+    *)
+      die "Unknown profile action '$action'. Use: list, init, new, show"
+      ;;
+  esac
+}
+
+cmd_targets() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+  
+  # List available targets from the build directory
+  local outdir
+  outdir="$(build_dir "$DEBUG_SUBDIR")"
+  
+  if [[ -d "$outdir" ]]; then
+    log "Available build targets:"
+    if command -v ninja >/dev/null 2>&1 && [[ -f "$outdir/build.ninja" ]]; then
+      ninja -C "$outdir" -t targets | grep -E '^[^:]+:' | cut -d: -f1 | sort | while read -r target; do
+        echo "  $target"
+      done
+    elif [[ -f "$outdir/Makefile" ]]; then
+      make -C "$outdir" help | grep -E '^\.\.\.' | sed 's/^... /  /' | sort
+    else
+      warn "No build system found. Run 'fargo build' first."
+    fi
+  else
+    warn "No build directory found. Run 'fargo build' first."
+    log "Expected targets based on CMakeLists.txt:"
+    local project_name
+    project_name=$(grep -o 'project([^)]*' "$CMAKELISTS_FILE" | sed 's/project(//' | awk '{print $1}')
+    echo "  $project_name (main executable)"
+    echo "  ${project_name}_tests (unit tests)"
+    echo "  ${project_name}_bench (benchmarks)"
+  fi
+}
+
+configure_build() {
+  local type="$1" # Debug or Release
+  local outdir="$2"
+  local sanitizer="${3:-}" # Optional sanitizer: asan, tsan
+  local target="${4:-}" # Optional specific target
+  
+  need_cmd cmake
+  
+  # Load profile configuration
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+  
+  if [[ -d "$PROFILES_DIR" ]]; then
+    load_profile "$CURRENT_PROFILE"
+  fi
+  
+  # Use profile settings or defaults
+  local generator_args=""
+  local preferred_generator="${CMAKE_GENERATOR:-Ninja}"
+  
+  if [[ "$preferred_generator" == "Ninja" ]] && command -v ninja >/dev/null 2>&1; then
+    generator_args="-G Ninja"
+    log "Configuring $type build in $outdir (using Ninja)"
+  elif [[ "$preferred_generator" == "Make" ]] || ! command -v ninja >/dev/null 2>&1; then
+    log "Configuring $type build in $outdir (using Make)"
+  else
+    generator_args="-G $preferred_generator"
+    log "Configuring $type build in $outdir (using $preferred_generator)"
+  fi
+  
+  # Build cmake command with profile settings
+  local cmake_cmd="cmake -S . -B $outdir -DCMAKE_BUILD_TYPE=$type $generator_args"
+  
+  # Add C++ standard from profile
+  if [[ -n "${CMAKE_CXX_STANDARD:-}" ]]; then
+    cmake_cmd="$cmake_cmd -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD"
+  fi
+  
+  # Add compiler flags from profile
+  local cxx_flags=""
+  if [[ "$type" == "Debug" && -n "${CXX_FLAGS_DEBUG:-}" ]]; then
+    cxx_flags="$CXX_FLAGS_DEBUG"
+  elif [[ "$type" == "Release" && -n "${CXX_FLAGS_RELEASE:-}" ]]; then
+    cxx_flags="$CXX_FLAGS_RELEASE"
+  fi
+  
+  # Add sanitizer flags if specified
+  case "$sanitizer" in
+    asan)
+      cxx_flags="$cxx_flags -fsanitize=address"
+      cmake_cmd="$cmake_cmd -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address"
+      log "Enabling AddressSanitizer"
+      ;;
+    tsan)
+      cxx_flags="$cxx_flags -fsanitize=thread"
+      cmake_cmd="$cmake_cmd -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread"
+      log "Enabling ThreadSanitizer"
+      ;;
+  esac
+  
+  if [[ -n "$cxx_flags" ]]; then
+    cmake_cmd="$cmake_cmd -DCMAKE_CXX_FLAGS=\"$cxx_flags\""
+  fi
+  
+  # Add extra options from profile
+  if [[ -n "${CMAKE_EXTRA_OPTIONS:-}" ]]; then
+    cmake_cmd="$cmake_cmd $CMAKE_EXTRA_OPTIONS"
+  fi
+  
+  local start_time=$(date +%s)
+  if [[ "$VERBOSE" == "true" ]]; then
+    eval "$cmake_cmd"
+  else
+    eval "$cmake_cmd" >/dev/null
+  fi
+  local end_time=$(date +%s)
+  local config_duration=$((end_time - start_time))
+
+  ok "$type configuration completed (${config_duration}s)"
+  
+  if [[ -n "$target" ]]; then
+    log "Configured for target: $target"
+  fi
+}
+
+build_dir() {
+  local mode="$1"
+  echo "$BUILD_DIR/$mode"
+}
+
+cmd_build_like() {
+  local mode="$1"
+  local sanitizer="${2:-}" # Optional sanitizer: asan, tsan
+  local target="${3:-}" # Optional specific target
+  local type
+  if [[ "$mode" == "$DEBUG_SUBDIR" ]]; then type="Debug"; else type="Release"; fi
+  # Override to Debug for sanitizer builds
+  if [[ -n "$sanitizer" ]]; then type="Debug"; fi
+
+  local root
+  root="$(project_root)" || die "Not inside a fargo project (can't find top-level CMakeLists.txt)"
+  cd "$root"
+
+  local outdir
+  outdir="$(build_dir "$mode")"
+  mkdir -p "$outdir"
+
+  local total_start_time=$(date +%s)
+  
+  configure_build "$type" "$outdir" "$sanitizer" "$target"
+
+  # Determine optimal number of parallel jobs
+  local jobs
+  if command -v nproc >/dev/null 2>&1; then
+    jobs=$(nproc)
+  elif [[ -r /proc/cpuinfo ]]; then
+    jobs=$(grep -c ^processor /proc/cpuinfo)
+  else
+    jobs=4  # Fallback to 4 jobs
+  fi
+
+  # Build specific target or all targets
+  local build_cmd="cmake --build $outdir --parallel $jobs"
+  if [[ -n "$target" ]]; then
+    build_cmd="$build_cmd --target $target"
+    log "Building target '$target' ($type) with $jobs parallel jobs..."
+  else
+    log "Building ($type) with $jobs parallel jobs..."
+  fi
+  
+  local build_start_time=$(date +%s)
+  if [[ "$VERBOSE" == "true" ]]; then
+    eval "$build_cmd --verbose"
+  else
+    eval "$build_cmd" >/dev/null
+  fi
+  local build_end_time=$(date +%s)
+  local build_duration=$((build_end_time - build_start_time))
+  
+  local total_end_time=$(date +%s)
+  local total_duration=$((total_end_time - total_start_time))
+  
+  if [[ -n "$target" ]]; then
+    ok "Target '$target' build finished: $outdir (build: ${build_duration}s, total: ${total_duration}s)"
+  else
+    ok "Build finished: $outdir (build: ${build_duration}s, total: ${total_duration}s)"
+  fi
+}
+
+cmd_build()   { 
+  local target="${1:-}"
+  cmd_build_like "$DEBUG_SUBDIR" "" "$target"
+}
+
+cmd_release() { 
+  local target="${1:-}"
+  cmd_build_like "$RELEASE_SUBDIR" "" "$target"
+}
+
+cmd_asan() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+
+  # Build with AddressSanitizer
+  cmd_build_like "$ASAN_SUBDIR" "asan"
+
+  # Get the project name from CMakeLists.txt
+  local project_name
+  project_name=$(grep -o 'project([^)]*' "$CMAKELISTS_FILE" | sed 's/project(//' | awk '{print $1}')
+  
+  local outdir
+  outdir="$(build_dir "$ASAN_SUBDIR")"
+  local binary_path="$outdir/$project_name"
+  
+  if [[ ! -f "$binary_path" ]]; then
+    die "AddressSanitizer binary not found at '$binary_path'"
+  fi
+
+  log "Running $project_name with AddressSanitizer..."
+  log "Note: AddressSanitizer will detect memory errors, leaks, and buffer overflows"
+  
+  # Set ASAN environment variables for better output
+  export ASAN_OPTIONS="color=always:print_stats=1:check_initialization_order=1:strict_init_order=1"
+  "$binary_path" "$@"
+}
+
+cmd_tsan() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+
+  # Build with ThreadSanitizer
+  cmd_build_like "$TSAN_SUBDIR" "tsan"
+
+  # Get the project name from CMakeLists.txt
+  local project_name
+  project_name=$(grep -o 'project([^)]*' "$CMAKELISTS_FILE" | sed 's/project(//' | awk '{print $1}')
+  
+  local outdir
+  outdir="$(build_dir "$TSAN_SUBDIR")"
+  local binary_path="$outdir/$project_name"
+  
+  if [[ ! -f "$binary_path" ]]; then
+    die "ThreadSanitizer binary not found at '$binary_path'"
+  fi
+
+  log "Running $project_name with ThreadSanitizer..."
+  log "Note: ThreadSanitizer will detect data races and threading issues"
+  
+  # Set TSAN environment variables for better output
+  export TSAN_OPTIONS="color=always:print_stats=1:halt_on_error=1"
+  "$binary_path" "$@"
+}
+
+cmd_clean() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+
+  if [[ -d "$BUILD_DIR" ]]; then
+    log "Removing '$BUILD_DIR' directory"
+    rm -rf "$BUILD_DIR"
+    ok "Cleaned build artifacts"
+
+  else
+    warn "Nothing to clean (no '$BUILD_DIR' dir)"
+  fi
+}
+
+cmd_test() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+
+  local outdir
+  outdir="$(build_dir "$DEBUG_SUBDIR")"
+
+  if [[ ! -d "$outdir" ]]; then
+    warn "No debug build found. Building first..."
+    cmd_build_like "$DEBUG_SUBDIR"
+  fi
+
+  log "Running tests..."
+  (cd "$outdir" && ctest --output-on-failure)
+}
+
+cmd_run() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+
+  local outdir
+  outdir="$(build_dir "$DEBUG_SUBDIR")"
+
+  if [[ ! -d "$outdir" ]]; then
+    warn "No debug build found. Building first..."
+    cmd_build_like "$DEBUG_SUBDIR"
+  fi
+
+  # Get the project name from CMakeLists.txt
+  local project_name
+  project_name=$(grep -o 'project([^)]*' "$CMAKELISTS_FILE" | sed 's/project(//' | awk '{print $1}')
+  
+  local binary_path="$outdir/$project_name"
+  
+  if [[ ! -f "$binary_path" ]]; then
+    die "Binary not found at '$binary_path'. Try running 'fargo build' first."
+  fi
+
+  log "Running $project_name..."
+  "$binary_path" "$@"
+}
+
+cmd_bench() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+
+  local outdir
+  outdir="$(build_dir "$RELEASE_SUBDIR")"
+
+  if [[ ! -d "$outdir" ]]; then
+    warn "No release build found. Building first..."
+    cmd_build_like "$RELEASE_SUBDIR"
+  fi
+
+  # Get the project name from CMakeLists.txt
+  local project_name
+  project_name=$(grep -o 'project([^)]*' "$CMAKELISTS_FILE" | sed 's/project(//' | awk '{print $1}')
+  
+  local bench_binary_path="$outdir/${project_name}_bench"
+  
+  if [[ ! -f "$bench_binary_path" ]]; then
+    die "Benchmark binary not found at '$bench_binary_path'. Try running 'fargo build' first."
+  fi
+
+  log "Running benchmarks..."
+  "$bench_binary_path" "$@"
+}
+
+cmd_check() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+
+  # Ensure we have a compile_commands.json for clang-tidy
+  local outdir
+  outdir="$(build_dir "$DEBUG_SUBDIR")"
+  
+  if [[ ! -f "$outdir/compile_commands.json" ]]; then
+    warn "No compile_commands.json found. Building first to generate it..."
+    cmd_build_like "$DEBUG_SUBDIR"
+  fi
+
+  log "Running static analysis..."
+  local found_analyzer=false
+  local has_issues=false
+
+  # Run clang-tidy if available
+  if command -v clang-tidy >/dev/null 2>&1; then
+    found_analyzer=true
+    log "Running clang-tidy analysis..."
+    
+    # Find all C++ source files
+    local cpp_files
+    cpp_files=$(find "$SRC_DIR" "$TEST_DIR" "$BENCH_DIR" -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" 2>/dev/null | head -20)
+    
+    if [[ -n "$cpp_files" ]]; then
+      local tidy_output
+      tidy_output=$(echo "$cpp_files" | xargs clang-tidy -p "$outdir" 2>&1 || true)
+      
+      if [[ -n "$tidy_output" ]]; then
+        echo "$tidy_output"
+        if echo "$tidy_output" | grep -q "warning:\|error:"; then
+          has_issues=true
+        fi
+      else
+        ok "clang-tidy: No issues found"
+      fi
+    fi
+  fi
+
+  # Run cppcheck if available
+  if command -v cppcheck >/dev/null 2>&1; then
+    found_analyzer=true
+    log "Running cppcheck analysis..."
+    
+    local cppcheck_output
+    cppcheck_output=$(cppcheck --enable=warning,style,performance,portability --std=c++20 \
+      --suppress=missingIncludeSystem --quiet \
+      "$SRC_DIR" "$TEST_DIR" "$BENCH_DIR" 2>&1 || true)
+    
+    if [[ -n "$cppcheck_output" ]]; then
+      echo "$cppcheck_output"
+      has_issues=true
+    else
+      ok "cppcheck: No issues found"
+    fi
+  fi
+
+  # Run clang static analyzer if available
+  if command -v scan-build >/dev/null 2>&1; then
+    found_analyzer=true
+    log "Running clang static analyzer..."
+    
+    # Clean and rebuild with static analyzer
+    local analyzer_outdir="$BUILD_DIR/analyzer"
+    rm -rf "$analyzer_outdir"
+    mkdir -p "$analyzer_outdir"
+    
+    local analyzer_output
+    analyzer_output=$(scan-build -o "$analyzer_outdir" --status-bugs \
+      cmake --build "$outdir" --target clean >/dev/null 2>&1 && \
+      scan-build -o "$analyzer_outdir" --status-bugs \
+      cmake --build "$outdir" 2>&1 || true)
+    
+    if [[ -n "$analyzer_output" ]] && echo "$analyzer_output" | grep -q "scan-build: \|Bug report"; then
+      echo "$analyzer_output"
+      has_issues=true
+    else
+      ok "clang static analyzer: No issues found"
+    fi
+  fi
+
+  if [[ "$found_analyzer" == "false" ]]; then
+    warn "No static analysis tools found. Install clang-tidy, cppcheck, or scan-build."
+    warn "Ubuntu/Debian: sudo apt install clang-tidy cppcheck clang-tools"
+    warn "Fedora: sudo dnf install clang-tools-extra cppcheck clang-analyzer"
+    return 1
+  fi
+
+  if [[ "$has_issues" == "true" ]]; then
+    warn "Static analysis found potential issues"
+    return 1
+  else
+    ok "Static analysis completed - no issues found"
+  fi
+}
+
+cmd_format() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+
+  # Check if clang-format is available
+  if ! command -v clang-format >/dev/null 2>&1; then
+    warn "clang-format not found. Install it to format code."
+    warn "Ubuntu/Debian: sudo apt install clang-format"
+    warn "Fedora: sudo dnf install clang-tools-extra"
+    warn "macOS: brew install clang-format"
+    return 1
+  fi
+
+  # Create .clang-format if it doesn't exist
+  local clang_format_file=".clang-format"
+  if [[ ! -f "$clang_format_file" ]]; then
+    log "Creating .clang-format configuration..."
+    
+    cat > "$clang_format_file" <<EOF
+---
+BasedOnStyle: Google
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 100
+BreakBeforeBraces: Attach
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortBlocksOnASingleLine: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+PointerAlignment: Left
+ReferenceAlignment: Left
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignTrailingComments: true
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false
+SpacesInAngles: false
+SpacesInContainerLiterals: false
+SpacesInCStyleCastParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+Standard: c++20
+SortIncludes: true
+IncludeBlocks: Regroup
+EOF
+
+    ok ".clang-format created with sensible defaults"
+  fi
+
+  # Find all C++ source and header files
+  local cpp_files
+  cpp_files=$(find "$SRC_DIR" "$TEST_DIR" "$BENCH_DIR" \( -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null)
+  
+  if [[ -z "$cpp_files" ]]; then
+    warn "No C++ source files found to format"
+    return 1
+  fi
+
+  local file_count
+  file_count=$(echo "$cpp_files" | wc -l)
+  
+  log "Formatting $file_count C++ files..."
+  local start_time=$(date +%s)
+  
+  # Check if we should just check formatting or actually format
+  local check_only=false
+  for arg in "$@"; do
+    case "$arg" in
+      --check|-c)
+        check_only=true
+        ;;
+    esac
+  done
+  
+  if [[ "$check_only" == "true" ]]; then
+    log "Checking code formatting (dry run)..."
+    local needs_formatting=false
+    
+    while IFS= read -r file; do
+      if ! clang-format --dry-run --Werror "$file" >/dev/null 2>&1; then
+        warn "File needs formatting: $file"
+        needs_formatting=true
+      fi
+    done <<< "$cpp_files"
+    
+    if [[ "$needs_formatting" == "true" ]]; then
+      warn "Some files need formatting. Run 'fargo format' to fix them."
+      return 1
+    else
+      ok "All files are properly formatted"
+    fi
+  else
+    # Actually format the files
+    echo "$cpp_files" | xargs clang-format -i
+    
+    local end_time=$(date +%s)
+    local format_duration=$((end_time - start_time))
+    
+    ok "Code formatting completed (${format_duration}s, $file_count files)"
+  fi
+}
+
+cmd_doc() {
+  local root
+  root="$(project_root)" || die "Not inside a fargo project"
+  cd "$root"
+
+  # Check if Doxygen is available
+  if ! command -v doxygen >/dev/null 2>&1; then
+    warn "Doxygen not found. Install it to generate documentation."
+    warn "Ubuntu/Debian: sudo apt install doxygen"
+    warn "Fedora: sudo dnf install doxygen"
+    warn "macOS: brew install doxygen"
+    return 1
+  fi
+
+  local doc_dir="docs"
+  local doxyfile="Doxyfile"
+
+  # Create docs directory
+  mkdir -p "$doc_dir"
+
+  # Generate Doxyfile if it doesn't exist
+  if [[ ! -f "$doxyfile" ]]; then
+    log "Creating Doxyfile configuration..."
+    
+    # Get project name from CMakeLists.txt
+    local project_name
+    project_name=$(grep -o 'project([^)]*' "$CMAKELISTS_FILE" | sed 's/project(//' | awk '{print $1}')
+    
+    cat > "$doxyfile" <<EOF
+# Doxyfile for $project_name
+PROJECT_NAME           = "$project_name"
+PROJECT_BRIEF          = "A C++ project built with fargo"
+OUTPUT_DIRECTORY       = $doc_dir
+INPUT                  = $SRC_DIR README.md
+RECURSIVE              = YES
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+HTML_COLORSTYLE_HUE    = 220
+HTML_COLORSTYLE_SAT    = 100
+HTML_COLORSTYLE_GAMMA  = 80
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = YES
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+HAVE_DOT               = YES
+DOT_GRAPH_MAX_NODES    = 50
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+FILE_PATTERNS          = *.cpp *.h *.hpp *.cxx *.cc
+EXCLUDE_PATTERNS       = */build/* */.*
+USE_MDFILE_AS_MAINPAGE = README.md
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+EOF
+
+    ok "Doxyfile created. You can customize it for your project needs."
+  fi
+
+  # Create a basic README.md if it doesn't exist
+  if [[ ! -f "README.md" ]]; then
+    local project_name
+    project_name=$(grep -o 'project([^)]*' "$CMAKELISTS_FILE" | sed 's/project(//' | awk '{print $1}')
+    
+    cat > "README.md" <<EOF
+# $project_name
+
+A C++ project built with fargo.
+
+## Building
+
+\`\`\`bash
+fargo build    # Debug build
+fargo release  # Release build
+\`\`\`
+
+## Running
+
+\`\`\`bash
+fargo run      # Run the application
+fargo test     # Run tests
+fargo bench    # Run benchmarks
+\`\`\`
+
+## Documentation
+
+\`\`\`bash
+fargo doc      # Generate documentation
+\`\`\`
+
+## Analysis
+
+\`\`\`bash
+fargo check    # Static analysis
+fargo asan     # AddressSanitizer
+fargo tsan     # ThreadSanitizer
+\`\`\`
+EOF
+
+    ok "README.md created with basic project information."
+  fi
+
+  log "Generating documentation with Doxygen..."
+  local start_time=$(date +%s)
+  
+  if [[ "$VERBOSE" == "true" ]]; then
+    doxygen "$doxyfile"
+  else
+    doxygen "$doxyfile" >/dev/null 2>&1
+  fi
+  
+  local end_time=$(date +%s)
+  local doc_duration=$((end_time - start_time))
+
+  if [[ -f "$doc_dir/html/index.html" ]]; then
+    ok "Documentation generated successfully (${doc_duration}s)"
+    log "Open $doc_dir/html/index.html in your browser to view the documentation"
+    
+    # Try to open documentation in browser if possible
+    if command -v xdg-open >/dev/null 2>&1; then
+      log "Opening documentation in browser..."
+      xdg-open "$doc_dir/html/index.html" >/dev/null 2>&1 &
+    elif command -v open >/dev/null 2>&1; then
+      log "Opening documentation in browser..."
+      open "$doc_dir/html/index.html" >/dev/null 2>&1 &
+    fi
+  else
+    warn "Documentation generation may have failed. Check Doxyfile configuration."
+    return 1
+  fi
+}
+
+print_help() {
+  cat <<EOF
+fargo v${FARGO_VERSION}
+Usage: fargo <command> [options] [args]
+
+Commands:
+  new <name>     Create a new C++ project scaffold in directory <name>
+  build [target] Configure & build Debug target into build/debug
+  release [target] Configure & build Release target into build/release
+  run, r         Run the debug binary (builds if needed)
+  test           Run tests from build/debug
+  bench          Run benchmarks from build/release (builds if needed)
+  check          Run static analysis (clang-tidy, cppcheck, scan-build)
+  format         Format C++ code with clang-format (use --check for dry run)
+  asan           Build and run with AddressSanitizer (memory error detection)
+  tsan           Build and run with ThreadSanitizer (data race detection)
+  doc            Generate documentation with Doxygen
+  clean          Remove the build directory
+  
+  Profile Management:
+  profile list   List available configuration profiles
+  profile new <name>  Create a new configuration profile
+  profile show [name] Show profile configuration
+  
+  Project Information:
+  targets        List available build targets
+  --help, -h     Show this help
+
+Options:
+  -v, --verbose  Show verbose output during build and configuration
+  -p, --profile <name>  Use specific configuration profile
+  
+Format Options:
+  --check, -c    Check formatting without making changes (for format command)
+
+Examples:
+  fargo new myapp
+  cd myapp && fargo build
+  fargo build myapp_tests     # Build specific target
+  fargo run
+  fargo build -v              # Build with verbose output
+  fargo run --verbose         # Run with verbose build output
+  fargo build -p release      # Use 'release' profile
+  fargo test
+  fargo check                 # Run static analysis
+  fargo format                # Format all C++ files
+  fargo format --check        # Check formatting (dry run)
+  fargo asan                  # Build and run with AddressSanitizer
+  fargo tsan                  # Build and run with ThreadSanitizer
+  fargo doc                   # Generate documentation
+  fargo bench
+  fargo release
+  fargo clean
+  fargo profile list          # List configuration profiles
+  fargo profile new myprofile # Create custom profile
+  fargo targets               # List available build targets
+
+
+EOF
+}
+
+# ---------- Main dispatch ----------
+main() {
+  [[ $# -eq 0 ]] && { print_help; exit 0; }
+
+  case "$1" in
+    new)       shift; cmd_new "$@";;
+    build)     shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_build "${args[@]}";;
+    release)   shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_release "${args[@]}";;
+    run|r)     shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_run "${args[@]}";;
+    test)      shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_test "${args[@]}";;
+    bench)     shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_bench "${args[@]}";;
+    check)     shift; cmd_check "$@";;
+    format)    shift; cmd_format "$@";;
+    asan)      shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_asan "${args[@]}";;
+    tsan)      shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_tsan "${args[@]}";;
+    doc)       shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_doc "${args[@]}";;
+    clean)     shift; cmd_clean "$@";;
+    profile)   shift; cmd_profile "$@";;
+    targets)   shift; cmd_targets "$@";;
+    --help|-h) print_help;;
+    --version) echo "$FARGO_VERSION";;
+    *)
+      err "Unknown command '$1'"
+      print_help
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
