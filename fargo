@@ -572,7 +572,7 @@ configure_build() {
   if [[ "$VERBOSE" == "true" ]]; then
     eval "$cmake_cmd"
   else
-    eval "$cmake_cmd" >/dev/null
+    eval "$cmake_cmd" >/dev/null 2>&1
   fi
   local end_time=$(date +%s)
   local config_duration=$((end_time - start_time))
@@ -633,7 +633,7 @@ cmd_build_like() {
   if [[ "$VERBOSE" == "true" ]]; then
     eval "$build_cmd --verbose"
   else
-    eval "$build_cmd" >/dev/null
+    eval "$build_cmd"
   fi
   local build_end_time=$(date +%s)
   local build_duration=$((build_end_time - build_start_time))
@@ -683,7 +683,7 @@ cmd_asan() {
   
   # Set ASAN environment variables for better output
   export ASAN_OPTIONS="color=always:print_stats=1:check_initialization_order=1:strict_init_order=1"
-  "$binary_path" "$@"
+  exec "$binary_path" "$@"
 }
 
 cmd_tsan() {
@@ -711,7 +711,7 @@ cmd_tsan() {
   
   # Set TSAN environment variables for better output
   export TSAN_OPTIONS="color=always:print_stats=1:halt_on_error=1"
-  "$binary_path" "$@"
+  exec "$binary_path" "$@"
 }
 
 cmd_clean() {
@@ -800,7 +800,7 @@ cmd_run() {
   fi
 
   log "Running $project_name..."
-  "$binary_path" "$@"
+  exec "$binary_path" "$@"
 }
 
 cmd_bench() {
