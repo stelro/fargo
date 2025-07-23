@@ -754,19 +754,49 @@ cmd_run() {
   local outdir
   outdir="$(build_dir "$DEBUG_SUBDIR")"
 
-  if [[ ! -d "$outdir" ]]; then
-    warn "No debug build found. Building first..."
-    cmd_build_like "$DEBUG_SUBDIR"
-  fi
-
   # Get the project name from CMakeLists.txt
   local project_name
   project_name=$(grep -o 'project([^)]*' "$CMAKELISTS_FILE" | sed 's/project(//' | awk '{print $1}')
   
   local binary_path="$outdir/$project_name"
-  
+  local needs_rebuild=false
+
+  # Check if build directory exists
+  if [[ ! -d "$outdir" ]]; then
+    log "No debug build found. Building first..."
+    needs_rebuild=true
+  # Check if binary exists
+  elif [[ ! -f "$binary_path" ]]; then
+    log "Binary not found. Building first..."
+    needs_rebuild=true
+  else
+    # Check if any source files are newer than the binary
+    local source_files
+    source_files=$(find "$SRC_DIR" "$TEST_DIR" -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" 2>/dev/null)
+    
+    # Also check CMakeLists.txt
+    if [[ -f "$CMAKELISTS_FILE" ]]; then
+      source_files="$source_files"$'\n'"$CMAKELISTS_FILE"
+    fi
+    
+    # Check if any source file is newer than the binary
+    while IFS= read -r file; do
+      if [[ -n "$file" && -f "$file" && "$file" -nt "$binary_path" ]]; then
+        log "Source file '$file' is newer than binary. Rebuilding..."
+        needs_rebuild=true
+        break
+      fi
+    done <<< "$source_files"
+  fi
+
+  # Rebuild if needed
+  if [[ "$needs_rebuild" == "true" ]]; then
+    cmd_build_like "$DEBUG_SUBDIR"
+  fi
+
+  # Verify binary exists after potential rebuild
   if [[ ! -f "$binary_path" ]]; then
-    die "Binary not found at '$binary_path'. Try running 'fargo build' first."
+    die "Binary not found at '$binary_path'. Build may have failed."
   fi
 
   log "Running $project_name..."
@@ -1172,7 +1202,7 @@ Commands:
   new <name>     Create a new C++ project scaffold in directory <name>
   build [target] Configure & build Debug target into build/debug
   release [target] Configure & build Release target into build/release
-  run, r         Run the debug binary (builds if needed)
+  run, r         Run the debug binary (automatically rebuilds if source files changed)
   test           Run tests from build/debug
   bench          Run benchmarks from build/release (builds if needed)
   check          Run static analysis (clang-tidy, cppcheck, scan-build)
