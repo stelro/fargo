@@ -110,20 +110,6 @@ load_profile() {
   fi
 }
 
-# Helper function to parse args in a compatible way
-parse_args_array() {
-  local args=()
-  parse_profile_flag "$@"
-  local args_output
-  args_output=$(parse_flags "$@")
-  if [[ -n "$args_output" ]]; then
-    while IFS= read -r line; do 
-      [[ -n "$line" ]] && args+=("$line")
-    done <<< "$args_output"
-  fi
-  printf '%s\0' "${args[@]+"${args[@]}"}"
-}
-
 # Create default profile configuration
 create_default_profile() {
   local profile_dir="$1"
@@ -783,6 +769,24 @@ cmd_bench() {
   root="$(project_root)" || die "Not inside a fargo project"
   cd "$root"
 
+  # Filter out fargo-specific flags and collect benchmark args
+  local bench_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -v|--verbose)
+        # Skip verbose flag - it's for fargo, not the benchmark binary
+        ;;
+      -p|--profile)
+        # Skip profile flag and its value
+        shift
+        ;;
+      *)
+        bench_args+=("$1")
+        ;;
+    esac
+    shift
+  done
+
   local outdir
   outdir="$(build_dir "$RELEASE_SUBDIR")"
 
@@ -802,7 +806,7 @@ cmd_bench() {
   fi
 
   log "Running benchmarks..."
-  "$bench_binary_path" "$@"
+  "$bench_binary_path" "${bench_args[@]}"
 }
 
 cmd_check() {
@@ -1201,6 +1205,7 @@ Examples:
   fargo tsan                  # Build and run with ThreadSanitizer
   fargo doc                   # Generate documentation
   fargo bench
+  fargo bench --benchmark_filter=BM_StringCreation  # Run specific benchmark
   fargo release
   fargo clean
   fargo profile list          # List configuration profiles
@@ -1215,58 +1220,54 @@ EOF
 main() {
   [[ $# -eq 0 ]] && { print_help; exit 0; }
 
+  # Parse profile flag first
+  parse_profile_flag "$@"
+
   case "$1" in
     new)       shift; cmd_new "$@";;
     build)     shift; 
-               args=()
-               while IFS= read -r -d '' arg; do 
-                 [[ -n "$arg" ]] && args+=("$arg")
-               done < <(parse_args_array "$@")
-               cmd_build "${args[@]+"${args[@]}"};;
+               # Parse remaining args
+               local filtered_args=()
+               while [[ $# -gt 0 ]]; do
+                 case "$1" in
+                   -v|--verbose) VERBOSE=true;;
+                   -p|--profile) shift;; # Skip profile and its value
+                   *) filtered_args+=("$1");;
+                 esac
+                 shift
+               done
+               cmd_build "${filtered_args[@]}";;
     release)   shift; 
-               args=()
-               while IFS= read -r -d '' arg; do 
-                 [[ -n "$arg" ]] && args+=("$arg")
-               done < <(parse_args_array "$@")
-               cmd_release "${args[@]+"${args[@]}"};;
+               # Parse remaining args
+               local filtered_args=()
+               while [[ $# -gt 0 ]]; do
+                 case "$1" in
+                   -v|--verbose) VERBOSE=true;;
+                   -p|--profile) shift;; # Skip profile and its value
+                   *) filtered_args+=("$1");;
+                 esac
+                 shift
+               done
+               cmd_release "${filtered_args[@]}";;
     run|r)     shift; 
-               args=()
-               while IFS= read -r -d '' arg; do 
-                 [[ -n "$arg" ]] && args+=("$arg")
-               done < <(parse_args_array "$@")
-               cmd_run "${args[@]+"${args[@]}"};;
-    test)      shift; 
-               args=()
-               while IFS= read -r -d '' arg; do 
-                 [[ -n "$arg" ]] && args+=("$arg")
-               done < <(parse_args_array "$@")
-               cmd_test "${args[@]+"${args[@]}"};;
-    bench)     shift; 
-               args=()
-               while IFS= read -r -d '' arg; do 
-                 [[ -n "$arg" ]] && args+=("$arg")
-               done < <(parse_args_array "$@")
-               cmd_bench "${args[@]+"${args[@]}"};;
+               # Parse remaining args
+               local filtered_args=()
+               while [[ $# -gt 0 ]]; do
+                 case "$1" in
+                   -v|--verbose) VERBOSE=true;;
+                   -p|--profile) shift;; # Skip profile and its value
+                   *) filtered_args+=("$1");;
+                 esac
+                 shift
+               done
+               cmd_run "${filtered_args[@]}";;
+    test)      shift; cmd_test "$@";;
+    bench)     shift; cmd_bench "$@";;
     check)     shift; cmd_check "$@";;
     format)    shift; cmd_format "$@";;
-    asan)      shift; 
-               args=()
-               while IFS= read -r -d '' arg; do 
-                 [[ -n "$arg" ]] && args+=("$arg")
-               done < <(parse_args_array "$@")
-               cmd_asan "${args[@]+"${args[@]}"};;
-    tsan)      shift; 
-               args=()
-               while IFS= read -r -d '' arg; do 
-                 [[ -n "$arg" ]] && args+=("$arg")
-               done < <(parse_args_array "$@")
-               cmd_tsan "${args[@]+"${args[@]}"};;
-    doc)       shift; 
-               args=()
-               while IFS= read -r -d '' arg; do 
-                 [[ -n "$arg" ]] && args+=("$arg")
-               done < <(parse_args_array "$@")
-               cmd_doc "${args[@]+"${args[@]}"};;
+    asan)      shift; cmd_asan "$@";;
+    tsan)      shift; cmd_tsan "$@";;
+    doc)       shift; cmd_doc "$@";;
     clean)     shift; cmd_clean "$@";;
     profile)   shift; cmd_profile "$@";;
     targets)   shift; cmd_targets "$@";;
