@@ -89,7 +89,12 @@ parse_flags() {
     esac
     shift
   done
-  printf '%s\n' "${args[@]}"
+  # Handle empty array case for compatibility with set -u
+  if [[ ${#args[@]} -eq 0 ]]; then
+    printf ''
+  else
+    printf '%s\n' "${args[@]}"
+  fi
 }
 
 # Load profile configuration
@@ -103,6 +108,20 @@ load_profile() {
   elif [[ "$profile_name" != "$DEFAULT_PROFILE" ]]; then
     warn "Profile '$profile_name' not found, using defaults"
   fi
+}
+
+# Helper function to parse args in a compatible way
+parse_args_array() {
+  local args=()
+  parse_profile_flag "$@"
+  local args_output
+  args_output=$(parse_flags "$@")
+  if [[ -n "$args_output" ]]; then
+    while IFS= read -r line; do 
+      [[ -n "$line" ]] && args+=("$line")
+    done <<< "$args_output"
+  fi
+  printf '%s\0' "${args[@]+"${args[@]}"}"
 }
 
 # Create default profile configuration
@@ -1198,16 +1217,56 @@ main() {
 
   case "$1" in
     new)       shift; cmd_new "$@";;
-    build)     shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_build "${args[@]}";;
-    release)   shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_release "${args[@]}";;
-    run|r)     shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_run "${args[@]}";;
-    test)      shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_test "${args[@]}";;
-    bench)     shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_bench "${args[@]}";;
+    build)     shift; 
+               args=()
+               while IFS= read -r -d '' arg; do 
+                 [[ -n "$arg" ]] && args+=("$arg")
+               done < <(parse_args_array "$@")
+               cmd_build "${args[@]+"${args[@]}"};;
+    release)   shift; 
+               args=()
+               while IFS= read -r -d '' arg; do 
+                 [[ -n "$arg" ]] && args+=("$arg")
+               done < <(parse_args_array "$@")
+               cmd_release "${args[@]+"${args[@]}"};;
+    run|r)     shift; 
+               args=()
+               while IFS= read -r -d '' arg; do 
+                 [[ -n "$arg" ]] && args+=("$arg")
+               done < <(parse_args_array "$@")
+               cmd_run "${args[@]+"${args[@]}"};;
+    test)      shift; 
+               args=()
+               while IFS= read -r -d '' arg; do 
+                 [[ -n "$arg" ]] && args+=("$arg")
+               done < <(parse_args_array "$@")
+               cmd_test "${args[@]+"${args[@]}"};;
+    bench)     shift; 
+               args=()
+               while IFS= read -r -d '' arg; do 
+                 [[ -n "$arg" ]] && args+=("$arg")
+               done < <(parse_args_array "$@")
+               cmd_bench "${args[@]+"${args[@]}"};;
     check)     shift; cmd_check "$@";;
     format)    shift; cmd_format "$@";;
-    asan)      shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_asan "${args[@]}";;
-    tsan)      shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_tsan "${args[@]}";;
-    doc)       shift; parse_profile_flag "$@"; readarray -t args < <(parse_flags "$@"); cmd_doc "${args[@]}";;
+    asan)      shift; 
+               args=()
+               while IFS= read -r -d '' arg; do 
+                 [[ -n "$arg" ]] && args+=("$arg")
+               done < <(parse_args_array "$@")
+               cmd_asan "${args[@]+"${args[@]}"};;
+    tsan)      shift; 
+               args=()
+               while IFS= read -r -d '' arg; do 
+                 [[ -n "$arg" ]] && args+=("$arg")
+               done < <(parse_args_array "$@")
+               cmd_tsan "${args[@]+"${args[@]}"};;
+    doc)       shift; 
+               args=()
+               while IFS= read -r -d '' arg; do 
+                 [[ -n "$arg" ]] && args+=("$arg")
+               done < <(parse_args_array "$@")
+               cmd_doc "${args[@]+"${args[@]}"};;
     clean)     shift; cmd_clean "$@";;
     profile)   shift; cmd_profile "$@";;
     targets)   shift; cmd_targets "$@";;
