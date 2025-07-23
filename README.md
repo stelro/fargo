@@ -457,7 +457,7 @@ fargo run -p performance --bench  # Performance profile for benchmarking
 ##  Requirements
 
 ### System Requirements
-- **Bash 4+** - Shell for script execution
+- **Bash 3+** - Shell for script execution
 - **CMake 3.18+** - Build system generator
 - **C++ Compiler** - GCC 10+, Clang 12+, or MSVC 2019+
 - **Build System** - Ninja (recommended) or Make
