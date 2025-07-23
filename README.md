@@ -10,7 +10,7 @@
 
 **fargo** is a lightweight, powerful build tool for C++ projects that brings the simplicity and elegance of Rust's Cargo to the C++ ecosystem. It provides project scaffolding, build management, testing, benchmarking, static analysis, documentation generation, and much more—all with a single, intuitive command-line interface.
 
-## 🌟 Why fargo?
+## Why fargo?
 
 ### The Problem
 C++ development often involves:
@@ -29,7 +29,7 @@ fargo eliminates this complexity by providing:
 - **Configuration profiles** - Environment-specific settings
 - **Modern C++ standards** - C++20 support out of the box
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Installation
 ```bash
@@ -65,37 +65,58 @@ That's it! You now have a fully functional C++ project with:
 - Documentation generation
 - Sanitizer support
 
-## 📋 Features
+#### Quick Command Reference
 
-### 🏗️ Project Management
+| Command | Description |
+|---------|-------------|
+| `fargo new <name>` | Create new C++ project with scaffolding |
+| `fargo build [target]` | Build project in debug mode |
+| `fargo release [target]` | Build project in release mode |
+| `fargo run` / `fargo r` | Build and run main executable |
+| `fargo test` | Run unit tests with GoogleTest |
+| `fargo bench` | Run benchmarks with Google Benchmark |
+| `fargo check` | Run static analysis (clang-tidy, cppcheck) |
+| `fargo format` | Format code with clang-format |
+| `fargo asan` | Build and run with AddressSanitizer |
+| `fargo tsan` | Build and run with ThreadSanitizer |
+| `fargo doc` | Generate documentation with Doxygen |
+| `fargo clean` | Remove build directory |
+| `fargo targets` | List available build targets |
+| `fargo profile list` | List configuration profiles |
+
+**Options:** `-v/--verbose` (verbose output), `-p/--profile <name>` (use profile)
+
+##  Features
+
+###  Project Management
 - **Instant scaffolding** - Create new projects with all necessary files
 - **Smart project detection** - Automatically finds project root
 - **Template generation** - CMakeLists.txt, source files, tests, and benchmarks
 
-### 🔨 Build System
+###  Build System
 - **Multi-generator support** - Ninja (preferred) and Make
 - **Parallel builds** - Automatic CPU detection for optimal performance
 - **Multiple configurations** - Debug, Release, and sanitizer builds
 - **Target-specific builds** - Build only what you need
 
-### 🧪 Testing & Quality
+###  Testing & Quality
 - **Integrated testing** - GoogleTest automatically configured
 - **Performance benchmarking** - Google Benchmark integration
 - **Static analysis** - clang-tidy, cppcheck, and scan-build support
 - **Code formatting** - clang-format with sensible defaults
 - **Memory analysis** - AddressSanitizer and ThreadSanitizer
 
-### 📚 Documentation
+###  Documentation
 - **Auto-generated docs** - Doxygen integration with beautiful defaults
 - **Markdown support** - README.md as main page
 - **Call graphs** - Visual representation of code relationships
 
-### ⚙️ Configuration Profiles
+###  Configuration Profiles
 - **Environment-specific settings** - Different configs for different needs
 - **Flexible customization** - Override any build parameter
 - **Team collaboration** - Share configurations across team members
 
-## 📖 Command Reference
+##  Command Reference
 
 ### Project Commands
 
@@ -333,7 +354,7 @@ Removes all build artifacts.
 fargo clean                    # Clean build directory
 ```
 
-## ⚙️ Configuration Profiles
+##  Configuration Profiles
 
 Configuration profiles allow you to customize build settings for different environments, teams, or use cases.
 
@@ -433,7 +454,7 @@ fargo run -p performance --bench  # Performance profile for benchmarking
 4. **Experimentation** - Test different compiler flags and optimizations
 5. **Tool Integration** - Custom configurations for different analysis tools
 
-## 🛠️ Requirements
+##  Requirements
 
 ### System Requirements
 - **Bash 4+** - Shell for script execution
@@ -467,120 +488,16 @@ sudo dnf install gcc-c++ cmake ninja-build clang-tools-extra cppcheck doxygen gr
 brew install cmake ninja clang-format llvm doxygen graphviz
 ```
 
-## 🎯 Use Cases
-
-### Individual Development
-- **Rapid prototyping** - Quick project setup
-- **Learning C++** - Modern practices built-in
-- **Competitive programming** - Fast iteration cycle
-
-### Team Development
-- **Consistent builds** - Same configuration everywhere
-- **Code quality** - Integrated analysis and formatting
-- **Documentation** - Automatic API docs generation
-
-### Open Source Projects
-- **Professional setup** - Complete toolchain integration
-- **Contributor friendly** - Simple build process
-- **CI/CD ready** - Profile-based configurations
-
-### Educational Use
-- **Teaching tool** - Demonstrates modern C++ practices
-- **Assignment template** - Quick project distribution
-- **Best practices** - Integrated quality tools
-
-## 📈 Benefits Over Traditional Approaches
-
-### vs. Manual CMake Setup
-| Traditional CMake | fargo |
-|-------------------|-------|
-| ⏰ Hours of setup | ⚡ Instant scaffolding |
-| 📚 Complex configuration | 🎯 Zero configuration |
-| 🔧 Manual tool integration | 🔗 Built-in toolchain |
-| 📝 Verbose commands | 🚀 Simple commands |
-
-### vs. Other Build Tools
-| Feature | fargo | Make | Ninja | Bazel |
-|---------|-------|------|-------|-------|
-| Project scaffolding | ✅ | ❌ | ❌ | ❌ |
-| Testing integration | ✅ | ❌ | ❌ | ✅ |
-| Static analysis | ✅ | ❌ | ❌ | ❌ |
-| Documentation | ✅ | ❌ | ❌ | ❌ |
-| Configuration profiles | ✅ | ❌ | ❌ | ❌ |
-| Learning curve | 🟢 Low | 🟡 Medium | 🟡 Medium | 🔴 High |
-
-## 🔮 Roadmap
-
-### Version 0.2.0 (Planned)
-- [ ] Package management integration
-- [ ] Watch mode for continuous builds
-- [ ] IDE integration (VS Code, CLion)
-- [ ] Windows support improvements
-
-### Version 0.3.0 (Future)
-- [ ] Remote build support
-- [ ] Container integration
-- [ ] Advanced profiling tools
-- [ ] GUI dashboard
-
-## 🤝 Contributing
-
-We welcome contributions! Here's how to get started:
-
-1. **Fork the repository**
-2. **Create a feature branch** - `git checkout -b feature/amazing-feature`
-3. **Make your changes** - Follow the existing code style
-4. **Add tests** - Ensure functionality works
-5. **Commit changes** - Use conventional commit messages
-6. **Push to branch** - `git push origin feature/amazing-feature`
-7. **Open a Pull Request** - Describe your changes
-
-### Development Setup
-```bash
-git clone https://github.com/yourusername/fargo.git
-cd fargo
-./fargo new test-project
-cd test-project
-../fargo build
-```
-
-### Testing Changes
-```bash
-# Test basic functionality
-./fargo new test-project
-cd test-project
-../fargo build
-../fargo test
-../fargo run
-
-# Test profiles
-../fargo profile new test-profile
-../fargo build -p test-profile
-```
-
-## 📄 License
+##  License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+##  Support
 
-**Created by:** Rostislav Stelmach (stelmach.ro@gmail.com)
-
-**Special thanks to:**
-- **Rust Cargo** - Inspiration for the design philosophy
-- **CMake Community** - Foundation for the build system
-- **Google Test/Benchmark** - Testing and benchmarking frameworks
-- **LLVM Project** - Static analysis and formatting tools
-- **Doxygen** - Documentation generation
-
-## 📞 Support
-
-- **Issues** - [GitHub Issues](https://github.com/yourusername/fargo/issues)
-- **Discussions** - [GitHub Discussions](https://github.com/yourusername/fargo/discussions)
-- **Wiki** - [Documentation Wiki](https://github.com/yourusername/fargo/wiki)
+- **Issues** - [GitHub Issues](https://github.com/stelro/fargo/issues)
+- **Discussions** - [GitHub Discussions](https://github.com/stelro/fargo/discussions)
+- **Wiki** - [Documentation Wiki](https://github.com/stelro/fargo/wiki)
 
 ---
-
-**Built with ❤️ for the C++ community**
 
 *fargo - Making C++ development as simple as it should be.*
