@@ -907,8 +907,8 @@ cmd_format() {
     cat > "$clang_format_file" <<EOF
 ---
 BasedOnStyle: Google
-IndentWidth: 2
-TabWidth: 2
+IndentWidth: 4
+TabWidth: 4
 UseTab: Never
 ColumnLimit: 100
 BreakBeforeBraces: Attach
