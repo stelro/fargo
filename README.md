@@ -1,6 +1,6 @@
 # fargo 🚢
 
-> A modern C++ project build tool inspired by Rust's Cargo
+> A modern C++ project build tool inspired by 'Others programming language' Cargo
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Language: Bash](https://img.shields.io/badge/Language-Bash-blue.svg)](https://www.gnu.org/software/bash/)
@@ -34,7 +34,7 @@ fargo eliminates this complexity by providing:
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/fargo.git
+git clone https://github.com/stelro/fargo.git
 cd fargo
 
 # Make it executable
