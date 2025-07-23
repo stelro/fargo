@@ -456,6 +456,12 @@ fargo run -p performance --bench  # Performance profile for benchmarking
 
 ##  Requirements
 
+### Supported Platforms
+- **Linux** - Ubuntu 20.04+, Debian 11+, Fedora 35+, Arch Linux, CentOS 8+
+- **macOS** - macOS 11.0+ (Big Sur and later) with Xcode Command Line Tools
+
+*Windows support with WSL (Windows Subsystem for Linux) should work but is not officially tested.*
+
 ### System Requirements
 - **Bash 3+** - Shell for script execution
 - **CMake 3.18+** - Build system generator
