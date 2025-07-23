@@ -49,9 +49,9 @@ else
 fi
 
 log()       { echo -e "${t_blue}[fargo]${t_reset} $*"; }
-ok()        { echo -e "${t_green}✔ ${t_reset} $*"; }
-warn()      { echo -e "${t_yellow}⚠ ${t_reset} $*"; }
-err()       { echo -e "${t_red}✖ ${t_reset} $*" >&2; }
+ok()        { echo -e "${t_green}[OK]${t_reset} $*"; }
+warn()      { echo -e "${t_yellow}[WARN]${t_reset} $*"; }
+err()       { echo -e "${t_red}[ERROR]${t_reset} $*" >&2; }
 die()       { err "$@"; exit 1; }
 
 # ---------- Utils ----------
@@ -65,7 +65,11 @@ parse_profile_flag() {
     case "$1" in
       -p|--profile)
         shift
-        CURRENT_PROFILE="$1"
+        if [[ $# -gt 0 && "$1" != -* ]]; then
+          CURRENT_PROFILE="$1"
+        else
+          die "Profile flag requires a value"
+        fi
         ;;
     esac
     shift
@@ -435,7 +439,12 @@ cmd_profile() {
       fi
       
       # Add header comment
-      sed -i "1i# Custom profile: $profile_name" "$profile_file"
+      if [[ "$(uname)" == "Darwin" ]]; then
+        sed -i '' "1i\\
+# Custom profile: $profile_name" "$profile_file"
+      else
+        sed -i "1i# Custom profile: $profile_name" "$profile_file"
+      fi
       
       ok "Profile '$profile_name' created. Edit $profile_file to customize."
       ;;
@@ -806,7 +815,7 @@ cmd_bench() {
   fi
 
   log "Running benchmarks..."
-  "$bench_binary_path" "${bench_args[@]}"
+  "$bench_binary_path" "${bench_args[@]+"${bench_args[@]}"}"
 }
 
 cmd_check() {
@@ -1236,7 +1245,7 @@ main() {
                  esac
                  shift
                done
-               cmd_build "${filtered_args[@]}";;
+               cmd_build "${filtered_args[@]+"${filtered_args[@]}"}";;
     release)   shift; 
                # Parse remaining args
                local filtered_args=()
@@ -1248,7 +1257,7 @@ main() {
                  esac
                  shift
                done
-               cmd_release "${filtered_args[@]}";;
+               cmd_release "${filtered_args[@]+"${filtered_args[@]}"}";;
     run|r)     shift; 
                # Parse remaining args
                local filtered_args=()
@@ -1260,7 +1269,7 @@ main() {
                  esac
                  shift
                done
-               cmd_run "${filtered_args[@]}";;
+               cmd_run "${filtered_args[@]+"${filtered_args[@]}"}";;
     test)      shift; cmd_test "$@";;
     bench)     shift; cmd_bench "$@";;
     check)     shift; cmd_check "$@";;
