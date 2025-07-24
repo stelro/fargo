@@ -8,7 +8,7 @@
 
 **Author:** Rostislav Stelmach (stelmach.ro@gmail.com)
 
-**fargo** is a lightweight, powerful build tool for C++ projects that brings the simplicity and elegance of Rust's Cargo to the C++ ecosystem. It provides project scaffolding, build management, testing, benchmarking, static analysis, documentation generation, and much more—all with a single, intuitive command-line interface.
+**fargo** is a lightweight, powerful build tool for C++ projects that brings the simplicity and elegance of Cargo to the C++ ecosystem. It provides project scaffolding, build management, testing, benchmarking, static analysis, documentation generation, and much more—all with a single, intuitive command-line interface.
 
 ## Why fargo?
 
