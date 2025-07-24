@@ -48,18 +48,6 @@ python install.py
 # OR install to user directory (no elevated privileges needed)
 python install.py --user
 
-# OR use Make (Unix-like systems)
-make install          # System-wide
-make install-user     # User directory
-```
-
-#### Windows-Specific
-```cmd
-REM For Windows users who prefer batch files
-install.bat           REM System-wide (requires Administrator)
-install.bat --user    REM User directory
-```
-
 #### Manual Installation
 ```bash
 # Make the Python script executable (Unix-like systems)
