@@ -32,16 +32,47 @@ fargo eliminates this complexity by providing:
 ##  Quick Start
 
 ### Installation
+
+#### Cross-Platform Installation (Recommended)
+
+**Requirements:** Python 3.7+, CMake 3.18+, C++ compiler
+
 ```bash
 # Clone the repository
 git clone https://github.com/stelro/fargo.git
 cd fargo
 
-# Make it executable
-chmod +x fargo
+# Install system-wide (requires sudo on Unix, Administrator on Windows)
+python install.py
 
-# Optional: Add to PATH
-sudo cp fargo /usr/local/bin/
+# OR install to user directory (no elevated privileges needed)
+python install.py --user
+
+# OR use Make (Unix-like systems)
+make install          # System-wide
+make install-user     # User directory
+```
+
+#### Windows-Specific
+```cmd
+REM For Windows users who prefer batch files
+install.bat           REM System-wide (requires Administrator)
+install.bat --user    REM User directory
+```
+
+#### Manual Installation
+```bash
+# Make the Python script executable (Unix-like systems)
+chmod +x fargo.py
+
+# Add to PATH or run directly
+./fargo.py --version
+```
+
+### Verify Installation
+```bash
+fargo --version
+fargo --help
 ```
 
 ### Create Your First Project
