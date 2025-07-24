@@ -39,42 +39,7 @@ python install.py --user
 # OR install to custom location
 python install.py --prefix ~/tools
 ```
-
-### Method 2: Using Make (Unix-like systems)
-
-```bash
-# System-wide installation (requires sudo)
-make install
-
-# User installation
-make install-user
-
-# Check requirements only
-make check
-
-# Uninstall
-make uninstall         # Remove system installation
-make uninstall-user    # Remove user installation
-```
-
-### Method 3: Windows-Specific Installers
-
-For Windows users who prefer native scripts:
-
-```cmd
-REM Batch file installer
-install.bat           REM System-wide (requires Administrator)
-install.bat --user    REM User directory
-```
-
-```powershell
-# PowerShell installer
-.\install.ps1          # System-wide (requires Administrator)
-.\install.ps1 -User    # User directory
-.\install.ps1 -Check   # Check requirements only
-```
-
-### Method 4: Manual Installation
+### Method 2: Manual Installation
 
 ```bash
 # Make the Python script executable (Unix-like systems)
@@ -246,13 +211,6 @@ python install.py --uninstall
 # Remove from user directory
 python install.py --uninstall --user
 ```
-
-### Using Make (Unix-like systems)
-```bash
-make uninstall         # System installation
-make uninstall-user    # User installation
-```
-
 ### Manual removal
 ```bash
 # Unix-like systems
