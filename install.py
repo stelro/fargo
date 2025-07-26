@@ -7,6 +7,9 @@ Cross-platform installer for fargo C++ project manager.
 Supports Windows, macOS, and Linux.
 
 Usage: python install.py [OPTIONS]
+
+Author: Rostislav Stelmach (rstelmac.ro@gmail.com)
+
 """
 
 import argparse
