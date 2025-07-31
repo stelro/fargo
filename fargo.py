@@ -739,11 +739,28 @@ def cmd_test(args: argparse.Namespace) -> None:
         warn("No debug build found. Building first...")
         cmd_build_like(DEBUG_SUBDIR)
     
-    log("Running tests...")
-    try:
-        run_command(["ctest", "--output-on-failure"], cwd=outdir)
-    except subprocess.CalledProcessError:
-        die("Tests failed")
+    # If no arguments provided, use CTest for test discovery and execution
+    if not args.args:
+        log("Running tests with CTest...")
+        try:
+            run_command(["ctest", "--output-on-failure"], cwd=outdir)
+        except subprocess.CalledProcessError:
+            die("Tests failed")
+    else:
+        # If arguments provided, run the test binary directly with Google Test arguments
+        project_name = get_project_name(root)
+        binary_ext = ".exe" if platform.system() == "Windows" else ""
+        test_binary = outdir / f"{project_name}_tests{binary_ext}"
+        
+        if not test_binary.exists():
+            die(f"Test binary not found at '{test_binary}'. Try running 'fargo build' first.")
+        
+        log("Running tests with custom arguments...")
+        test_cmd = [str(test_binary)] + args.args
+        try:
+            subprocess.run(test_cmd, check=False)
+        except KeyboardInterrupt:
+            log("Interrupted by user")
 
 
 def cmd_bench(args: argparse.Namespace) -> None:
@@ -1216,7 +1233,9 @@ Examples:
   fargo build -v              # Build with verbose output
   fargo run --verbose         # Run with verbose build output
   fargo build -p release      # Use 'release' profile
-  fargo test
+  fargo test                  # Run all tests with CTest
+  fargo test -- --gtest_filter=MyTest*       # Run specific tests
+  fargo test -- --gtest_repeat=5             # Run tests multiple times
   fargo check                 # Run static analysis
   fargo format                # Format all C++ files
   fargo format --check        # Check formatting (dry run)
@@ -1259,7 +1278,8 @@ Version: {__version__}
     run_parser.add_argument("args", nargs="*", help="Arguments to pass to the binary")
     
     # test command
-    subparsers.add_parser("test", help="Run tests")
+    test_parser = subparsers.add_parser("test", help="Run tests")
+    test_parser.add_argument("args", nargs="*", help="Arguments to pass to the test binary (use -- to separate fargo options from test options)")
     
     # bench command
     bench_parser = subparsers.add_parser("bench", help="Run benchmarks")
