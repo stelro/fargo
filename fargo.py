@@ -591,7 +591,7 @@ def configure_build(build_type: str, outdir: Path, sanitizer: str = None, target
     outdir.mkdir(parents=True, exist_ok=True)
     
     try:
-        run_command(cmake_cmd, capture_output=not verbose)
+        run_command(cmake_cmd, capture_output=False)
     except subprocess.CalledProcessError:
         die("CMake configuration failed")
     
@@ -1230,9 +1230,9 @@ Examples:
   cd myapp && fargo build
   fargo build myapp_tests     # Build specific target
   fargo run
-  fargo build -v              # Build with verbose output
-  fargo run --verbose         # Run with verbose build output
-  fargo build -p release      # Use 'release' profile
+  fargo -v build              # Build with verbose output
+  fargo -v run                # Run with verbose build output
+  fargo -p release build      # Use 'release' profile
   fargo test                  # Run all tests with CTest
   fargo test -- --gtest_filter=MyTest*       # Run specific tests
   fargo test -- --gtest_repeat=5             # Run tests multiple times
