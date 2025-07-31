@@ -646,7 +646,13 @@ def cmd_build_like(mode: str, sanitizer: str = None, target: str = None) -> None
 
 def cmd_build(args: argparse.Namespace) -> None:
     """Build debug target."""
-    cmd_build_like(DEBUG_SUBDIR, target=args.target)
+    if args.target:
+        # Build specific target
+        cmd_build_like(DEBUG_SUBDIR, target=args.target)
+    else:
+        # Build all targets (main, tests, benchmarks) to ensure everything is up to date
+        log("Building all targets...")
+        cmd_build_like(DEBUG_SUBDIR)
 
 
 def cmd_release(args: argparse.Namespace) -> None:
@@ -734,10 +740,47 @@ def cmd_test(args: argparse.Namespace) -> None:
     os.chdir(root)
     
     outdir = get_build_dir(DEBUG_SUBDIR)
+    project_name = get_project_name(root)
+    binary_ext = ".exe" if platform.system() == "Windows" else ""
+    test_binary = outdir / f"{project_name}_tests{binary_ext}"
     
+    needs_rebuild = False
+    
+    # Check if build directory exists
     if not outdir.exists():
-        warn("No debug build found. Building first...")
+        log("No debug build found. Building first...")
+        needs_rebuild = True
+    elif not test_binary.exists():
+        log("Test binary not found. Building first...")
+        needs_rebuild = True
+    else:
+        # Check if any source files are newer than the test binary
+        source_patterns = [
+            f"{SRC_DIR}/**/*.cpp", f"{SRC_DIR}/**/*.cxx", f"{SRC_DIR}/**/*.cc",
+            f"{SRC_DIR}/**/*.h", f"{SRC_DIR}/**/*.hpp", f"{SRC_DIR}/**/*.hxx",
+            f"{TEST_DIR}/**/*.cpp", f"{TEST_DIR}/**/*.cxx", f"{TEST_DIR}/**/*.cc",
+            f"{TEST_DIR}/**/*.h", f"{TEST_DIR}/**/*.hpp", f"{TEST_DIR}/**/*.hxx",
+            CMAKELISTS_FILE
+        ]
+        
+        test_binary_mtime = test_binary.stat().st_mtime
+        
+        for pattern in source_patterns:
+            for source_file in glob.glob(pattern, recursive=True):
+                if Path(source_file).stat().st_mtime > test_binary_mtime:
+                    log(f"Source file '{source_file}' is newer than test binary. Rebuilding...")
+                    needs_rebuild = True
+                    break
+            if needs_rebuild:
+                break
+    
+    # Rebuild if needed
+    if needs_rebuild:
         cmd_build_like(DEBUG_SUBDIR)
+    
+    # Verify test binary exists after potential rebuild
+    if not test_binary.exists():
+        die(f"Test binary not found at '{test_binary}'. Build may have failed.")
     
     # If no arguments provided, use CTest for test discovery and execution
     if not args.args:
@@ -747,14 +790,6 @@ def cmd_test(args: argparse.Namespace) -> None:
         except subprocess.CalledProcessError:
             die("Tests failed")
     else:
-        # If arguments provided, run the test binary directly with Google Test arguments
-        project_name = get_project_name(root)
-        binary_ext = ".exe" if platform.system() == "Windows" else ""
-        test_binary = outdir / f"{project_name}_tests{binary_ext}"
-        
-        if not test_binary.exists():
-            die(f"Test binary not found at '{test_binary}'. Try running 'fargo build' first.")
-        
         log("Running tests with custom arguments...")
         test_cmd = [str(test_binary)] + args.args
         try:
@@ -769,17 +804,47 @@ def cmd_bench(args: argparse.Namespace) -> None:
     os.chdir(root)
     
     outdir = get_build_dir(RELEASE_SUBDIR)
-    
-    if not outdir.exists():
-        warn("No release build found. Building first...")
-        cmd_build_like(RELEASE_SUBDIR)
-    
     project_name = get_project_name(root)
     binary_ext = ".exe" if platform.system() == "Windows" else ""
     bench_binary = outdir / f"{project_name}_bench{binary_ext}"
     
+    needs_rebuild = False
+    
+    # Check if build directory exists
+    if not outdir.exists():
+        log("No release build found. Building first...")
+        needs_rebuild = True
+    elif not bench_binary.exists():
+        log("Benchmark binary not found. Building first...")
+        needs_rebuild = True
+    else:
+        # Check if any source files are newer than the benchmark binary
+        source_patterns = [
+            f"{SRC_DIR}/**/*.cpp", f"{SRC_DIR}/**/*.cxx", f"{SRC_DIR}/**/*.cc",
+            f"{SRC_DIR}/**/*.h", f"{SRC_DIR}/**/*.hpp", f"{SRC_DIR}/**/*.hxx",
+            f"{BENCH_DIR}/**/*.cpp", f"{BENCH_DIR}/**/*.cxx", f"{BENCH_DIR}/**/*.cc",
+            f"{BENCH_DIR}/**/*.h", f"{BENCH_DIR}/**/*.hpp", f"{BENCH_DIR}/**/*.hxx",
+            CMAKELISTS_FILE
+        ]
+        
+        bench_binary_mtime = bench_binary.stat().st_mtime
+        
+        for pattern in source_patterns:
+            for source_file in glob.glob(pattern, recursive=True):
+                if Path(source_file).stat().st_mtime > bench_binary_mtime:
+                    log(f"Source file '{source_file}' is newer than benchmark binary. Rebuilding...")
+                    needs_rebuild = True
+                    break
+            if needs_rebuild:
+                break
+    
+    # Rebuild if needed
+    if needs_rebuild:
+        cmd_build_like(RELEASE_SUBDIR)
+    
+    # Verify benchmark binary exists after potential rebuild
     if not bench_binary.exists():
-        die(f"Benchmark binary not found at '{bench_binary}'. Try running 'fargo build' first.")
+        die(f"Benchmark binary not found at '{bench_binary}'. Build may have failed.")
     
     log("Running benchmarks...")
     bench_cmd = [str(bench_binary)] + (args.args or [])
