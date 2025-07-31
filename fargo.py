@@ -539,7 +539,7 @@ def configure_build(build_type: str, outdir: Path, sanitizer: str = None, target
     profile = load_profile()
     
     # Determine generator
-    preferred_generator = profile.get("CMAKE_GENERATOR", "Ninja")
+    preferred_generator = profile.get("cmake_generator", "Ninja")
     generator_args = []
     
     if preferred_generator == "Ninja" and shutil.which("ninja"):
@@ -558,16 +558,16 @@ def configure_build(build_type: str, outdir: Path, sanitizer: str = None, target
     ] + generator_args
     
     # Add C++ standard from profile
-    cxx_standard = profile.get("CMAKE_CXX_STANDARD")
+    cxx_standard = profile.get("cmake_cxx_standard")
     if cxx_standard:
         cmake_cmd.append(f"-DCMAKE_CXX_STANDARD={cxx_standard}")
     
     # Add compiler flags from profile
     cxx_flags = ""
     if build_type == "Debug":
-        cxx_flags = profile.get("CXX_FLAGS_DEBUG", "")
+        cxx_flags = profile.get("cxx_flags_debug", "")
     elif build_type == "Release":
-        cxx_flags = profile.get("CXX_FLAGS_RELEASE", "")
+        cxx_flags = profile.get("cxx_flags_release", "")
     
     # Add sanitizer flags if specified
     if sanitizer == "asan":
@@ -583,7 +583,7 @@ def configure_build(build_type: str, outdir: Path, sanitizer: str = None, target
         cmake_cmd.append(f"-DCMAKE_CXX_FLAGS={cxx_flags.strip()}")
     
     # Add extra options from profile
-    extra_options = profile.get("CMAKE_EXTRA_OPTIONS")
+    extra_options = profile.get("cmake_extra_options")
     if extra_options:
         cmake_cmd.extend(extra_options.split())
     
