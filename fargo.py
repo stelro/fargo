@@ -1223,7 +1223,9 @@ Examples:
   fargo asan                  # Build and run with AddressSanitizer
   fargo tsan                  # Build and run with ThreadSanitizer
   fargo doc                   # Generate documentation
-  fargo bench
+  fargo bench                 # Run all benchmarks
+  fargo bench -- --benchmark_filter=MyBench  # Run specific benchmark
+  fargo bench -- --benchmark_min_time=5s     # Run with custom timing
   fargo release
   fargo clean
   fargo profile list          # List configuration profiles
@@ -1261,7 +1263,7 @@ Version: {__version__}
     
     # bench command
     bench_parser = subparsers.add_parser("bench", help="Run benchmarks")
-    bench_parser.add_argument("args", nargs="*", help="Arguments to pass to the benchmark binary")
+    bench_parser.add_argument("args", nargs="*", help="Arguments to pass to the benchmark binary (use -- to separate fargo options from benchmark options)")
     
     # check command
     subparsers.add_parser("check", help="Run static analysis")
