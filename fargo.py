@@ -225,6 +225,12 @@ CMAKE_CXX_STANDARD=20
 CMAKE_BUILD_TYPE_DEBUG=Debug
 CMAKE_BUILD_TYPE_RELEASE=Release
 
+# Compiler configuration
+# Leave empty to use system default, or specify: g++, clang++, /usr/bin/g++-12, etc.
+CMAKE_CXX_COMPILER=
+# You can also specify C compiler if needed
+CMAKE_C_COMPILER=
+
 # Compiler flags
 CXX_FLAGS_DEBUG=-Wall -Wextra -g
 CXX_FLAGS_RELEASE=-O3 -DNDEBUG
@@ -314,11 +320,17 @@ FetchContent_Declare(
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googlebenchmark)
 
-# Benchmark executable
-file(GLOB_RECURSE BENCH_SOURCES "bench/*.cpp" "bench/*.cxx" "bench/*.cc")
-add_executable(${{PROJECT_NAME}}_bench ${{BENCH_SOURCES}})
-target_link_libraries(${{PROJECT_NAME}}_bench benchmark::benchmark)
-target_include_directories(${{PROJECT_NAME}}_bench PRIVATE src)
+# Individual benchmark executables - each .cpp file becomes its own executable
+file(GLOB BENCH_SOURCES "bench/*.cpp" "bench/*.cxx" "bench/*.cc")
+foreach(BENCH_FILE ${{BENCH_SOURCES}})
+  get_filename_component(BENCH_NAME ${{BENCH_FILE}} NAME_WE)
+  add_executable(${{PROJECT_NAME}}_${{BENCH_NAME}} ${{BENCH_FILE}})
+  target_link_libraries(${{PROJECT_NAME}}_${{BENCH_NAME}} benchmark::benchmark)
+  target_include_directories(${{PROJECT_NAME}}_${{BENCH_NAME}} PRIVATE src)
+  
+  # Optional: link with project library if you have shared code
+  # target_link_libraries(${{PROJECT_NAME}}_${{BENCH_NAME}} ${{PROJECT_NAME}}_lib)
+endforeach()
 
 # ---- Custom Targets ----
 # Example: add more executables here
@@ -556,6 +568,17 @@ def configure_build(build_type: str, outdir: Path, sanitizer: str = None, target
         "cmake", "-S", ".", "-B", str(outdir),
         f"-DCMAKE_BUILD_TYPE={build_type}"
     ] + generator_args
+    
+    # Add compiler selection from profile
+    cxx_compiler = profile.get("cmake_cxx_compiler")
+    if cxx_compiler and cxx_compiler.strip():
+        cmake_cmd.append(f"-DCMAKE_CXX_COMPILER={cxx_compiler}")
+        log(f"Using C++ compiler: {cxx_compiler}")
+    
+    c_compiler = profile.get("cmake_c_compiler")
+    if c_compiler and c_compiler.strip():
+        cmake_cmd.append(f"-DCMAKE_C_COMPILER={c_compiler}")
+        log(f"Using C compiler: {c_compiler}")
     
     # Add C++ standard from profile
     cxx_standard = profile.get("cmake_cxx_standard")
@@ -806,7 +829,6 @@ def cmd_bench(args: argparse.Namespace) -> None:
     outdir = get_build_dir(RELEASE_SUBDIR)
     project_name = get_project_name(root)
     binary_ext = ".exe" if platform.system() == "Windows" else ""
-    bench_binary = outdir / f"{project_name}_bench{binary_ext}"
     
     needs_rebuild = False
     
@@ -814,11 +836,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
     if not outdir.exists():
         log("No release build found. Building first...")
         needs_rebuild = True
-    elif not bench_binary.exists():
-        log("Benchmark binary not found. Building first...")
-        needs_rebuild = True
     else:
-        # Check if any source files are newer than the benchmark binary
+        # Check if any source files are newer than any benchmark binary
         source_patterns = [
             f"{SRC_DIR}/**/*.cpp", f"{SRC_DIR}/**/*.cxx", f"{SRC_DIR}/**/*.cc",
             f"{SRC_DIR}/**/*.h", f"{SRC_DIR}/**/*.hpp", f"{SRC_DIR}/**/*.hxx",
@@ -827,31 +846,92 @@ def cmd_bench(args: argparse.Namespace) -> None:
             CMAKELISTS_FILE
         ]
         
-        bench_binary_mtime = bench_binary.stat().st_mtime
+        # Find all benchmark source files to determine what executables should exist
+        bench_files = []
+        for pattern in [f"{BENCH_DIR}/*.cpp", f"{BENCH_DIR}/*.cxx", f"{BENCH_DIR}/*.cc"]:
+            bench_files.extend(glob.glob(pattern))
         
+        if not bench_files:
+            warn("No benchmark files found in bench/ directory")
+            return
+        
+        # Check if all benchmark binaries exist and are up to date
+        latest_source_time = 0
         for pattern in source_patterns:
             for source_file in glob.glob(pattern, recursive=True):
-                if Path(source_file).stat().st_mtime > bench_binary_mtime:
-                    log(f"Source file '{source_file}' is newer than benchmark binary. Rebuilding...")
-                    needs_rebuild = True
-                    break
-            if needs_rebuild:
+                latest_source_time = max(latest_source_time, Path(source_file).stat().st_mtime)
+        
+        for bench_file in bench_files:
+            bench_name = Path(bench_file).stem
+            bench_binary = outdir / f"{project_name}_{bench_name}{binary_ext}"
+            
+            if not bench_binary.exists():
+                log(f"Benchmark binary '{bench_name}' not found. Building first...")
+                needs_rebuild = True
+                break
+            elif bench_binary.stat().st_mtime < latest_source_time:
+                log(f"Source files newer than benchmark binary '{bench_name}'. Rebuilding...")
+                needs_rebuild = True
                 break
     
     # Rebuild if needed
     if needs_rebuild:
         cmd_build_like(RELEASE_SUBDIR)
     
-    # Verify benchmark binary exists after potential rebuild
-    if not bench_binary.exists():
-        die(f"Benchmark binary not found at '{bench_binary}'. Build may have failed.")
+    # Find all benchmark executables
+    bench_files = []
+    for pattern in [f"{BENCH_DIR}/*.cpp", f"{BENCH_DIR}/*.cxx", f"{BENCH_DIR}/*.cc"]:
+        bench_files.extend(glob.glob(pattern))
     
-    log("Running benchmarks...")
-    bench_cmd = [str(bench_binary)] + (args.args or [])
-    try:
-        subprocess.run(bench_cmd, check=False)
-    except KeyboardInterrupt:
-        log("Interrupted by user")
+    if not bench_files:
+        warn("No benchmark files found in bench/ directory")
+        return
+    
+    bench_executables = []
+    for bench_file in bench_files:
+        bench_name = Path(bench_file).stem
+        bench_binary = outdir / f"{project_name}_{bench_name}{binary_ext}"
+        if bench_binary.exists():
+            bench_executables.append((bench_name, bench_binary))
+        else:
+            warn(f"Benchmark binary not found: {bench_binary}")
+    
+    if not bench_executables:
+        die("No benchmark executables found. Build may have failed.")
+    
+    # Check if user wants to run a specific benchmark
+    specific_bench = getattr(args, 'name', None)
+    bench_args = getattr(args, 'args', [])
+    
+    if specific_bench:
+        # Run specific benchmark
+        found = False
+        for bench_name, bench_binary in bench_executables:
+            if bench_name == specific_bench:
+                log(f"Running benchmark: {bench_name}")
+                bench_cmd = [str(bench_binary)] + bench_args
+                try:
+                    subprocess.run(bench_cmd, check=False)
+                except KeyboardInterrupt:
+                    log("Interrupted by user")
+                found = True
+                break
+        
+        if not found:
+            available = [name for name, _ in bench_executables]
+            die(f"Benchmark '{specific_bench}' not found. Available benchmarks: {', '.join(available)}")
+    else:
+        # Run all benchmarks
+        log(f"Running {len(bench_executables)} benchmark(s)...")
+        for bench_name, bench_binary in bench_executables:
+            log(f"Running benchmark: {bench_name}")
+            bench_cmd = [str(bench_binary)] + bench_args
+            try:
+                subprocess.run(bench_cmd, check=False)
+                print()  # Add spacing between benchmarks
+            except KeyboardInterrupt:
+                log("Interrupted by user")
+                break
 
 
 def cmd_asan(args: argparse.Namespace) -> None:
@@ -1298,6 +1378,7 @@ Examples:
   fargo -v build              # Build with verbose output
   fargo -v run                # Run with verbose build output
   fargo -p release build      # Use 'release' profile
+  fargo -p clang build        # Use custom profile (e.g., with clang++)
   fargo test                  # Run all tests with CTest
   fargo test -- --gtest_filter=MyTest*       # Run specific tests
   fargo test -- --gtest_repeat=5             # Run tests multiple times
@@ -1348,6 +1429,7 @@ Version: {__version__}
     
     # bench command
     bench_parser = subparsers.add_parser("bench", help="Run benchmarks")
+    bench_parser.add_argument("--name", help="Run a specific benchmark by name")
     bench_parser.add_argument("args", nargs="*", help="Arguments to pass to the benchmark binary (use -- to separate fargo options from benchmark options)")
     
     # check command
