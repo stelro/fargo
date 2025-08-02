@@ -1,4 +1,4 @@
-# fargo 🚢
+# fargo
 
 > A modern C++ project build tool inspired by 'Others programming language' Cargo
 
@@ -93,7 +93,7 @@ That's it! You now have a fully functional C++ project with:
 | `fargo release [target]` | Build project in release mode |
 | `fargo run` / `fargo r` | Build and run main executable |
 | `fargo test` | Run unit tests with GoogleTest |
-| `fargo bench` | Run benchmarks with Google Benchmark |
+| `fargo bench [--name benchmark_name]` | Run benchmarks with Google Benchmark |
 | `fargo check` | Run static analysis (clang-tidy, cppcheck) |
 | `fargo format` | Format code with clang-format |
 | `fargo asan` | Build and run with AddressSanitizer |
@@ -114,13 +114,15 @@ That's it! You now have a fully functional C++ project with:
 
 ###  Build System
 - **Multi-generator support** - Ninja (preferred) and Make
+- **Compiler flexibility** - GCC, Clang, or custom compiler selection via profiles
 - **Parallel builds** - Automatic CPU detection for optimal performance
 - **Multiple configurations** - Debug, Release, and sanitizer builds
 - **Target-specific builds** - Build only what you need
 
 ###  Testing & Quality
 - **Integrated testing** - GoogleTest automatically configured
-- **Performance benchmarking** - Google Benchmark integration
+- **Individual benchmarks** - Each .cpp file becomes separate executable
+- **Performance benchmarking** - Google Benchmark integration with selective execution
 - **Static analysis** - clang-tidy, cppcheck, and scan-build support
 - **Code formatting** - clang-format with sensible defaults
 - **Memory analysis** - AddressSanitizer and ThreadSanitizer
@@ -223,15 +225,23 @@ fargo test                     # Run all tests
 Runs performance benchmarks using Google Benchmark.
 
 **Features:**
+- Individual benchmark executables (each `.cpp` file becomes its own executable)
 - Release build for accurate measurements
 - Statistical analysis
 - Regression detection
 - Multiple output formats
+- Run specific benchmarks or all benchmarks
 
-**Example:**
+**Examples:**
 ```bash
-fargo bench                    # Run all benchmarks
+fargo bench                              # Run all benchmarks
+fargo bench --name my_benchmark          # Run specific benchmark
+fargo bench --name sort_bench -- --benchmark_filter=QuickSort
+fargo bench -- --benchmark_min_time=5s  # Run all with custom timing
+fargo bench -- --benchmark_repetitions=10  # Multiple repetitions
 ```
+
+**Note:** Each `.cpp` file in the `bench/` directory becomes an individual executable named `{project_name}_{benchmark_name}`. This allows each benchmark file to have its own `BENCHMARK_MAIN()` macro.
 
 ### Analysis Commands
 
@@ -382,6 +392,7 @@ Configuration profiles allow you to customize build settings for different envir
 Profiles are stored in `.fargo/profiles/` as shell configuration files. Each profile can override:
 
 - **Build settings** - Generator, C++ standard, build types
+- **Compiler selection** - Choose between GCC, Clang, or specific compiler versions
 - **Compiler flags** - Debug/release optimization levels
 - **Tool configuration** - Test runners, benchmark settings
 - **Analysis settings** - Static analysis severity levels
@@ -396,6 +407,11 @@ CMAKE_GENERATOR="Ninja"
 CMAKE_CXX_STANDARD="20"
 CMAKE_BUILD_TYPE_DEBUG="Debug"
 CMAKE_BUILD_TYPE_RELEASE="Release"
+
+# Compiler configuration
+# Leave empty to use system default, or specify: g++, clang++, /usr/bin/g++-12, etc.
+CMAKE_CXX_COMPILER=""
+CMAKE_C_COMPILER=""
 
 # Compiler flags
 CXX_FLAGS_DEBUG="-Wall -Wextra -g"
@@ -452,6 +468,29 @@ CMAKE_EXTRA_OPTIONS="-DCMAKE_TOOLCHAIN_FILE=arm64-toolchain.cmake"
 CMAKE_GENERATOR="Make"
 ```
 
+#### Example: Clang Compiler Profile
+```bash
+fargo profile new clang
+
+# Edit .fargo/profiles/clang.conf
+CMAKE_CXX_COMPILER="clang++"
+CMAKE_C_COMPILER="clang"
+CXX_FLAGS_DEBUG="-Wall -Wextra -Weverything -Wno-c++98-compat -g"
+CXX_FLAGS_RELEASE="-O3 -DNDEBUG -flto"
+```
+
+#### Example: GCC Latest Profile
+```bash
+fargo profile new gcc-latest
+
+# Edit .fargo/profiles/gcc-latest.conf
+CMAKE_CXX_COMPILER="/usr/bin/g++-13"
+CMAKE_C_COMPILER="/usr/bin/gcc-13"
+CMAKE_CXX_STANDARD="23"
+CXX_FLAGS_DEBUG="-Wall -Wextra -Wpedantic -g -fsanitize=undefined"
+CXX_FLAGS_RELEASE="-O3 -DNDEBUG -march=native"
+```
+
 ### Using Profiles
 
 ```bash
@@ -459,10 +498,11 @@ CMAKE_GENERATOR="Make"
 fargo build -p strict
 fargo test -p performance
 fargo release -p arm64
+fargo bench -p clang               # Build benchmarks with Clang
 
 # Combine with other flags
-fargo build -p strict -v          # Strict profile with verbose output
-fargo run -p performance --bench  # Performance profile for benchmarking
+fargo build -p strict -v           # Strict profile with verbose output
+fargo bench -p clang --name sort_bench  # Clang profile for specific benchmark
 ```
 
 ### Profile Benefits
