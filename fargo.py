@@ -302,13 +302,20 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-# Test executable
-file(GLOB_RECURSE TEST_SOURCES "test/*.cpp" "test/*.cxx" "test/*.cc")
-add_executable(${{PROJECT_NAME}}_tests ${{TEST_SOURCES}})
-target_link_libraries(${{PROJECT_NAME}}_tests gtest_main)
-target_include_directories(${{PROJECT_NAME}}_tests PRIVATE src)
-
-add_test(NAME ${{PROJECT_NAME}}_tests COMMAND ${{PROJECT_NAME}}_tests)
+# Individual test executables - each .cpp file becomes its own executable
+file(GLOB TEST_SOURCES "test/*.cpp" "test/*.cxx" "test/*.cc")
+foreach(TEST_FILE ${{TEST_SOURCES}})
+  get_filename_component(TEST_NAME ${{TEST_FILE}} NAME_WE)
+  add_executable(${{PROJECT_NAME}}_${{TEST_NAME}} ${{TEST_FILE}})
+  target_link_libraries(${{PROJECT_NAME}}_${{TEST_NAME}} gtest_main)
+  target_include_directories(${{PROJECT_NAME}}_${{TEST_NAME}} PRIVATE src)
+  
+  # Optional: link with project library if you have shared code
+  # target_link_libraries(${{PROJECT_NAME}}_${{TEST_NAME}} ${{PROJECT_NAME}}_lib)
+  
+  # Register each test executable with CTest
+  add_test(NAME ${{TEST_NAME}} COMMAND ${{PROJECT_NAME}}_${{TEST_NAME}})
+endforeach()
 
 # ---- Benchmarks ----
 # Fetch Google Benchmark
@@ -369,14 +376,41 @@ def write_test_cpp() -> None:
     test_dir = Path(TEST_DIR)
     test_dir.mkdir(exist_ok=True)
     
+    # Main example test
     template = """#include <gtest/gtest.h>
 
-
-TEST(SampleTest, BasicAssertion) {
+TEST(ExampleTest, BasicAssertion) {
     EXPECT_EQ(2 + 2, 4);
+}
+
+TEST(ExampleTest, StringComparison) {
+    std::string hello = "Hello";
+    std::string world = "World";
+    EXPECT_NE(hello, world);
 }
 """
     (test_dir / TEST_FILE).write_text(template)
+    
+    # Additional math test to demonstrate individual test files
+    math_test = """#include <gtest/gtest.h>
+#include <cmath>
+
+TEST(MathTest, Addition) {
+    EXPECT_EQ(1 + 1, 2);
+    EXPECT_EQ(5 + 7, 12);
+}
+
+TEST(MathTest, Multiplication) {
+    EXPECT_EQ(3 * 4, 12);
+    EXPECT_EQ(7 * 8, 56);
+}
+
+TEST(MathTest, SquareRoot) {
+    EXPECT_DOUBLE_EQ(std::sqrt(4.0), 2.0);
+    EXPECT_DOUBLE_EQ(std::sqrt(9.0), 3.0);
+}
+"""
+    (test_dir / "math_test.cpp").write_text(math_test)
 
 
 def write_bench_cpp() -> None:
@@ -765,7 +799,6 @@ def cmd_test(args: argparse.Namespace) -> None:
     outdir = get_build_dir(DEBUG_SUBDIR)
     project_name = get_project_name(root)
     binary_ext = ".exe" if platform.system() == "Windows" else ""
-    test_binary = outdir / f"{project_name}_tests{binary_ext}"
     
     needs_rebuild = False
     
@@ -773,11 +806,8 @@ def cmd_test(args: argparse.Namespace) -> None:
     if not outdir.exists():
         log("No debug build found. Building first...")
         needs_rebuild = True
-    elif not test_binary.exists():
-        log("Test binary not found. Building first...")
-        needs_rebuild = True
     else:
-        # Check if any source files are newer than the test binary
+        # Check if any source files are newer than any test binary
         source_patterns = [
             f"{SRC_DIR}/**/*.cpp", f"{SRC_DIR}/**/*.cxx", f"{SRC_DIR}/**/*.cc",
             f"{SRC_DIR}/**/*.h", f"{SRC_DIR}/**/*.hpp", f"{SRC_DIR}/**/*.hxx",
@@ -786,39 +816,110 @@ def cmd_test(args: argparse.Namespace) -> None:
             CMAKELISTS_FILE
         ]
         
-        test_binary_mtime = test_binary.stat().st_mtime
+        # Find all test source files to determine what executables should exist
+        test_files = []
+        for pattern in [f"{TEST_DIR}/*.cpp", f"{TEST_DIR}/*.cxx", f"{TEST_DIR}/*.cc"]:
+            test_files.extend(glob.glob(pattern))
         
+        if not test_files:
+            warn("No test files found in test/ directory")
+            return
+        
+        # Check if all test binaries exist and are up to date
+        latest_source_time = 0
         for pattern in source_patterns:
             for source_file in glob.glob(pattern, recursive=True):
-                if Path(source_file).stat().st_mtime > test_binary_mtime:
-                    log(f"Source file '{source_file}' is newer than test binary. Rebuilding...")
-                    needs_rebuild = True
-                    break
-            if needs_rebuild:
+                latest_source_time = max(latest_source_time, Path(source_file).stat().st_mtime)
+        
+        for test_file in test_files:
+            test_name = Path(test_file).stem
+            test_binary = outdir / f"{project_name}_{test_name}{binary_ext}"
+            
+            if not test_binary.exists():
+                log(f"Test binary '{test_name}' not found. Building first...")
+                needs_rebuild = True
+                break
+            elif test_binary.stat().st_mtime < latest_source_time:
+                log(f"Source files newer than test binary '{test_name}'. Rebuilding...")
+                needs_rebuild = True
                 break
     
     # Rebuild if needed
     if needs_rebuild:
         cmd_build_like(DEBUG_SUBDIR)
     
-    # Verify test binary exists after potential rebuild
-    if not test_binary.exists():
-        die(f"Test binary not found at '{test_binary}'. Build may have failed.")
+    # Find all test executables
+    test_files = []
+    for pattern in [f"{TEST_DIR}/*.cpp", f"{TEST_DIR}/*.cxx", f"{TEST_DIR}/*.cc"]:
+        test_files.extend(glob.glob(pattern))
     
-    # If no arguments provided, use CTest for test discovery and execution
-    if not args.args:
+    if not test_files:
+        warn("No test files found in test/ directory")
+        return
+    
+    test_executables = []
+    for test_file in test_files:
+        test_name = Path(test_file).stem
+        test_binary = outdir / f"{project_name}_{test_name}{binary_ext}"
+        if test_binary.exists():
+            test_executables.append((test_name, test_binary))
+        else:
+            warn(f"Test binary not found: {test_binary}")
+    
+    if not test_executables:
+        die("No test executables found. Build may have failed.")
+    
+    # Check if user wants to run a specific test
+    specific_test = getattr(args, 'name', None)
+    test_args = getattr(args, 'args', [])
+    
+    if specific_test:
+        # Run specific test
+        found = False
+        for test_name, test_binary in test_executables:
+            if test_name == specific_test:
+                log(f"Running test: {test_name}")
+                test_cmd = [str(test_binary)] + test_args
+                try:
+                    result = subprocess.run(test_cmd, check=False)
+                    if result.returncode != 0:
+                        die(f"Test '{test_name}' failed")
+                except KeyboardInterrupt:
+                    log("Interrupted by user")
+                found = True
+                break
+        
+        if not found:
+            available = [name for name, _ in test_executables]
+            die(f"Test '{specific_test}' not found. Available tests: {', '.join(available)}")
+    elif test_args:
+        # If arguments provided but no specific test, run all tests with those arguments
+        log(f"Running {len(test_executables)} test(s) with custom arguments...")
+        failed_tests = []
+        for test_name, test_binary in test_executables:
+            log(f"Running test: {test_name}")
+            test_cmd = [str(test_binary)] + test_args
+            try:
+                result = subprocess.run(test_cmd, check=False)
+                if result.returncode != 0:
+                    failed_tests.append(test_name)
+                print()  # Add spacing between tests
+            except KeyboardInterrupt:
+                log("Interrupted by user")
+                break
+        
+        if failed_tests:
+            die(f"Failed tests: {', '.join(failed_tests)}")
+        else:
+            ok("All tests passed")
+    else:
+        # Use CTest for test discovery and execution (best practice)
         log("Running tests with CTest...")
         try:
-            run_command(["ctest", "--output-on-failure"], cwd=outdir)
+            run_command(["ctest", "--output-on-failure", "--verbose"], cwd=outdir)
+            ok("All tests passed")
         except subprocess.CalledProcessError:
-            die("Tests failed")
-    else:
-        log("Running tests with custom arguments...")
-        test_cmd = [str(test_binary)] + args.args
-        try:
-            subprocess.run(test_cmd, check=False)
-        except KeyboardInterrupt:
-            log("Interrupted by user")
+            die("Some tests failed. See output above for details.")
 
 
 def cmd_bench(args: argparse.Namespace) -> None:
@@ -1358,8 +1459,28 @@ def cmd_targets(args: argparse.Namespace) -> None:
         log("Expected targets based on CMakeLists.txt:")
         project_name = get_project_name(root)
         print(f"  {project_name} (main executable)")
-        print(f"  {project_name}_tests (unit tests)")
-        print(f"  {project_name}_bench (benchmarks)")
+        
+        # List individual test executables
+        test_files = []
+        for pattern in [f"{TEST_DIR}/*.cpp", f"{TEST_DIR}/*.cxx", f"{TEST_DIR}/*.cc"]:
+            test_files.extend(glob.glob(pattern))
+        
+        if test_files:
+            print("  Test executables:")
+            for test_file in test_files:
+                test_name = Path(test_file).stem
+                print(f"    {project_name}_{test_name}")
+        
+        # List individual benchmark executables
+        bench_files = []
+        for pattern in [f"{BENCH_DIR}/*.cpp", f"{BENCH_DIR}/*.cxx", f"{BENCH_DIR}/*.cc"]:
+            bench_files.extend(glob.glob(pattern))
+        
+        if bench_files:
+            print("  Benchmark executables:")
+            for bench_file in bench_files:
+                bench_name = Path(bench_file).stem
+                print(f"    {project_name}_{bench_name}")
 
 
 def main() -> None:
@@ -1380,6 +1501,7 @@ Examples:
   fargo -p release build      # Use 'release' profile
   fargo -p clang build        # Use custom profile (e.g., with clang++)
   fargo test                  # Run all tests with CTest
+  fargo test --name example_test      # Run specific test
   fargo test -- --gtest_filter=MyTest*       # Run specific tests
   fargo test -- --gtest_repeat=5             # Run tests multiple times
   fargo check                 # Run static analysis
@@ -1425,6 +1547,7 @@ Version: {__version__}
     
     # test command
     test_parser = subparsers.add_parser("test", help="Run tests")
+    test_parser.add_argument("--name", help="Run a specific test by name")
     test_parser.add_argument("args", nargs="*", help="Arguments to pass to the test binary (use -- to separate fargo options from test options)")
     
     # bench command
