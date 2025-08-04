@@ -1424,64 +1424,69 @@ def cmd_targets(args: argparse.Namespace) -> None:
     os.chdir(root)
     
     outdir = get_build_dir(DEBUG_SUBDIR)
+    project_name = get_project_name(root)
     
-    if outdir.exists():
-        log("Available build targets:")
-        
-        # Try to get targets from build system
-        if (outdir / "build.ninja").exists() and shutil.which("ninja"):
-            try:
-                result = run_command(["ninja", "-C", str(outdir), "-t", "targets"], capture_output=True)
-                targets = []
-                for line in result.stdout.splitlines():
-                    if ':' in line and not line.startswith('#'):
-                        target = line.split(':')[0]
-                        targets.append(target)
-                
-                for target in sorted(set(targets)):
-                    print(f"  {target}")
-            except Exception:
-                warn("Could not get targets from ninja")
-        
-        elif (outdir / "Makefile").exists():
-            try:
-                result = run_command(["make", "-C", str(outdir), "help"], capture_output=True, check=False)
-                for line in result.stdout.splitlines():
-                    if line.startswith("..."):
-                        target = line[3:].strip()
-                        print(f"  {target}")
-            except Exception:
-                warn("Could not get targets from make")
-        else:
-            warn("No build system found. Run 'fargo build' first.")
-    else:
+    if not outdir.exists():
         warn("No build directory found. Run 'fargo build' first.")
-        log("Expected targets based on CMakeLists.txt:")
-        project_name = get_project_name(root)
-        print(f"  {project_name} (main executable)")
-        
-        # List individual test executables
-        test_files = []
-        for pattern in [f"{TEST_DIR}/*.cpp", f"{TEST_DIR}/*.cxx", f"{TEST_DIR}/*.cc"]:
-            test_files.extend(glob.glob(pattern))
-        
-        if test_files:
-            print("  Test executables:")
-            for test_file in test_files:
-                test_name = Path(test_file).stem
-                print(f"    {project_name}_{test_name}")
-        
-        # List individual benchmark executables
-        bench_files = []
-        for pattern in [f"{BENCH_DIR}/*.cpp", f"{BENCH_DIR}/*.cxx", f"{BENCH_DIR}/*.cc"]:
-            bench_files.extend(glob.glob(pattern))
-        
-        if bench_files:
-            print("  Benchmark executables:")
-            for bench_file in bench_files:
-                bench_name = Path(bench_file).stem
-                print(f"    {project_name}_{bench_name}")
-
+        outdir = None
+    
+    log("Available project targets:")
+    
+    # Main executable
+    print(f"  {project_name} (main executable)")
+    
+    # List individual test executables
+    test_files = []
+    for pattern in [f"{TEST_DIR}/*.cpp", f"{TEST_DIR}/*.cxx", f"{TEST_DIR}/*.cc"]:
+        test_files.extend(glob.glob(pattern))
+    
+    if test_files:
+        print("  Test executables:")
+        for test_file in test_files:
+            test_name = Path(test_file).stem
+            test_target = f"{project_name}_{test_name}"
+            
+            # Check if binary exists if build directory is available
+            if outdir:
+                binary_ext = ".exe" if platform.system() == "Windows" else ""
+                binary_path = outdir / f"{test_target}{binary_ext}"
+                status = " ✓" if binary_path.exists() else " (not built)"
+            else:
+                status = ""
+            
+            print(f"    {test_target}{status}")
+    
+    # List individual benchmark executables
+    bench_files = []
+    for pattern in [f"{BENCH_DIR}/*.cpp", f"{BENCH_DIR}/*.cxx", f"{BENCH_DIR}/*.cc"]:
+        bench_files.extend(glob.glob(pattern))
+    
+    if bench_files:
+        print("  Benchmark executables:")
+        for bench_file in bench_files:
+            bench_name = Path(bench_file).stem
+            bench_target = f"{project_name}_{bench_name}"
+            
+            # Check if binary exists if build directory is available
+            if outdir:
+                binary_ext = ".exe" if platform.system() == "Windows" else ""
+                binary_path = outdir / f"{bench_target}{binary_ext}"
+                status = " ✓" if binary_path.exists() else " (not built)"
+            else:
+                status = ""
+            
+            print(f"    {bench_target}{status}")
+    
+    # Show utility targets
+    print("  Utility targets:")
+    print("    clean (remove build artifacts)")
+    if outdir and (outdir / "build.ninja").exists():
+        print("    install (install project)")
+    
+    # Show total count
+    total_targets = 1 + len(test_files) + len(bench_files)
+    print(f"\nTotal project targets: {total_targets}")
+    
 
 def main() -> None:
     """Main entry point."""
