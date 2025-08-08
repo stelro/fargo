@@ -174,6 +174,28 @@ def get_cpu_count() -> int:
         return 4
 
 
+def extract_target_name(file_path: str) -> str:
+    """Extract target name from C++ source file path, handling multiple extensions."""
+    path = Path(file_path)
+    name = path.name
+    
+    # Handle common compound extensions like .t.cpp, .test.cpp, .bench.cpp
+    compound_extensions = ['.t.cpp', '.test.cpp', '.bench.cpp', '.t.cxx', '.test.cxx', '.bench.cxx', 
+                          '.t.cc', '.test.cc', '.bench.cc']
+    
+    for ext in compound_extensions:
+        if name.endswith(ext):
+            return name[:-len(ext)]
+    
+    # Handle simple extensions
+    simple_extensions = ['.cpp', '.cxx', '.cc', '.c++']
+    for ext in simple_extensions:
+        if name.endswith(ext):
+            return name[:-len(ext)]
+    
+    return name
+
+
 def get_project_name(root: Path) -> str:
     """Extract project name from CMakeLists.txt."""
     cmake_file = root / CMAKELISTS_FILE
@@ -306,15 +328,15 @@ FetchContent_MakeAvailable(googletest)
 file(GLOB TEST_SOURCES "test/*.cpp" "test/*.cxx" "test/*.cc")
 foreach(TEST_FILE ${{TEST_SOURCES}})
   get_filename_component(TEST_NAME ${{TEST_FILE}} NAME_WE)
-  add_executable(${{PROJECT_NAME}}_${{TEST_NAME}} ${{TEST_FILE}})
-  target_link_libraries(${{PROJECT_NAME}}_${{TEST_NAME}} gtest_main)
-  target_include_directories(${{PROJECT_NAME}}_${{TEST_NAME}} PRIVATE src)
+  add_executable(${{TEST_NAME}} ${{TEST_FILE}})
+  target_link_libraries(${{TEST_NAME}} gtest_main)
+  target_include_directories(${{TEST_NAME}} PRIVATE src)
   
   # Optional: link with project library if you have shared code
-  # target_link_libraries(${{PROJECT_NAME}}_${{TEST_NAME}} ${{PROJECT_NAME}}_lib)
+  # target_link_libraries(${{TEST_NAME}} ${{PROJECT_NAME}}_lib)
   
   # Register each test executable with CTest
-  add_test(NAME ${{TEST_NAME}} COMMAND ${{PROJECT_NAME}}_${{TEST_NAME}})
+  add_test(NAME ${{TEST_NAME}} COMMAND ${{TEST_NAME}})
 endforeach()
 
 # ---- Benchmarks ----
@@ -331,12 +353,12 @@ FetchContent_MakeAvailable(googlebenchmark)
 file(GLOB BENCH_SOURCES "bench/*.cpp" "bench/*.cxx" "bench/*.cc")
 foreach(BENCH_FILE ${{BENCH_SOURCES}})
   get_filename_component(BENCH_NAME ${{BENCH_FILE}} NAME_WE)
-  add_executable(${{PROJECT_NAME}}_${{BENCH_NAME}} ${{BENCH_FILE}})
-  target_link_libraries(${{PROJECT_NAME}}_${{BENCH_NAME}} benchmark::benchmark)
-  target_include_directories(${{PROJECT_NAME}}_${{BENCH_NAME}} PRIVATE src)
+  add_executable(${{BENCH_NAME}} ${{BENCH_FILE}})
+  target_link_libraries(${{BENCH_NAME}} benchmark::benchmark)
+  target_include_directories(${{BENCH_NAME}} PRIVATE src)
   
   # Optional: link with project library if you have shared code
-  # target_link_libraries(${{PROJECT_NAME}}_${{BENCH_NAME}} ${{PROJECT_NAME}}_lib)
+  # target_link_libraries(${{BENCH_NAME}} ${{PROJECT_NAME}}_lib)
 endforeach()
 
 # ---- Custom Targets ----
@@ -832,8 +854,9 @@ def cmd_test(args: argparse.Namespace) -> None:
                 latest_source_time = max(latest_source_time, Path(source_file).stat().st_mtime)
         
         for test_file in test_files:
-            test_name = Path(test_file).stem
-            test_binary = outdir / f"{project_name}_{test_name}{binary_ext}"
+            # Extract test name properly - remove all extensions, not just the last one
+            test_name = extract_target_name(test_file)
+            test_binary = outdir / f"{test_name}{binary_ext}"
             
             if not test_binary.exists():
                 log(f"Test binary '{test_name}' not found. Building first...")
@@ -859,12 +882,21 @@ def cmd_test(args: argparse.Namespace) -> None:
     
     test_executables = []
     for test_file in test_files:
-        test_name = Path(test_file).stem
-        test_binary = outdir / f"{project_name}_{test_name}{binary_ext}"
+        # Extract test name properly - remove all extensions, not just the last one
+        test_name = extract_target_name(test_file)
+        test_binary = outdir / f"{test_name}{binary_ext}"
         if test_binary.exists():
             test_executables.append((test_name, test_binary))
         else:
             warn(f"Test binary not found: {test_binary}")
+            # Debug: Show what files actually exist in the build directory
+            if verbose:
+                log(f"Looking for: {test_binary}")
+                if outdir.exists():
+                    log(f"Files in {outdir}:")
+                    for f in outdir.iterdir():
+                        if f.is_file() and f.suffix in ['', '.exe']:  # Show executables
+                            log(f"  {f.name}")
     
     if not test_executables:
         die("No test executables found. Build may have failed.")
@@ -963,8 +995,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
                 latest_source_time = max(latest_source_time, Path(source_file).stat().st_mtime)
         
         for bench_file in bench_files:
-            bench_name = Path(bench_file).stem
-            bench_binary = outdir / f"{project_name}_{bench_name}{binary_ext}"
+            bench_name = extract_target_name(bench_file)
+            bench_binary = outdir / f"{bench_name}{binary_ext}"
             
             if not bench_binary.exists():
                 log(f"Benchmark binary '{bench_name}' not found. Building first...")
@@ -990,8 +1022,8 @@ def cmd_bench(args: argparse.Namespace) -> None:
     
     bench_executables = []
     for bench_file in bench_files:
-        bench_name = Path(bench_file).stem
-        bench_binary = outdir / f"{project_name}_{bench_name}{binary_ext}"
+        bench_name = extract_target_name(bench_file)
+        bench_binary = outdir / f"{bench_name}{binary_ext}"
         if bench_binary.exists():
             bench_executables.append((bench_name, bench_binary))
         else:
@@ -1443,8 +1475,8 @@ def cmd_targets(args: argparse.Namespace) -> None:
     if test_files:
         print("  Test executables:")
         for test_file in test_files:
-            test_name = Path(test_file).stem
-            test_target = f"{project_name}_{test_name}"
+            test_name = extract_target_name(test_file)
+            test_target = test_name  # No longer prefixed with project name
             
             # Check if binary exists if build directory is available
             if outdir:
@@ -1464,8 +1496,8 @@ def cmd_targets(args: argparse.Namespace) -> None:
     if bench_files:
         print("  Benchmark executables:")
         for bench_file in bench_files:
-            bench_name = Path(bench_file).stem
-            bench_target = f"{project_name}_{bench_name}"
+            bench_name = extract_target_name(bench_file)
+            bench_target = bench_name  # No longer prefixed with project name
             
             # Check if binary exists if build directory is available
             if outdir:
@@ -1497,32 +1529,46 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Examples:
-  fargo new myapp
-  cd myapp && fargo build
-  fargo build myapp_tests     # Build specific target
-  fargo run
-  fargo -v build              # Build with verbose output
-  fargo -v run                # Run with verbose build output
-  fargo -p release build      # Use 'release' profile
-  fargo -p clang build        # Use custom profile (e.g., with clang++)
-  fargo test                  # Run all tests with CTest
-  fargo test --name example_test      # Run specific test
-  fargo test -- --gtest_filter=MyTest*       # Run specific tests
+  fargo new myapp                             # Create new project
+  cd myapp && fargo build                     # Build debug version
+  fargo run                                   # Run the application
+
+  # Building & Running
+  fargo build                                 # Build debug target
+  fargo build myapp_tests                     # Build specific target
+  fargo release                               # Build release target
+  fargo run                                   # Run debug binary
+  fargo clean                                 # Clean build artifacts
+
+  # Testing
+  fargo test                                  # Run all tests with CTest
+  fargo test --name example_test              # Run specific test
+  fargo test -- --gtest_filter=MyTest*       # Run tests matching pattern
   fargo test -- --gtest_repeat=5             # Run tests multiple times
-  fargo check                 # Run static analysis
-  fargo format                # Format all C++ files
-  fargo format --check        # Check formatting (dry run)
-  fargo asan                  # Build and run with AddressSanitizer
-  fargo tsan                  # Build and run with ThreadSanitizer
-  fargo doc                   # Generate documentation
-  fargo bench                 # Run all benchmarks
-  fargo bench -- --benchmark_filter=MyBench  # Run specific benchmark
+
+  # Benchmarking
+  fargo bench                                 # Run all benchmarks
+  fargo bench --name example_bench            # Run specific benchmark
+  fargo bench -- --benchmark_filter=MyBench  # Run benchmarks matching pattern
   fargo bench -- --benchmark_min_time=5s     # Run with custom timing
-  fargo release
-  fargo clean
-  fargo profile list          # List configuration profiles
-  fargo profile new myprofile # Create custom profile
-  fargo targets               # List available build targets
+
+  # Code Quality
+  fargo format                                # Format all C++ files
+  fargo format --check                       # Check formatting (dry run)
+  fargo check                                 # Run static analysis
+  fargo asan                                  # Build and run with AddressSanitizer
+  fargo tsan                                  # Build and run with ThreadSanitizer
+
+  # Documentation & Configuration
+  fargo doc                                   # Generate documentation
+  fargo targets                               # List available build targets
+  fargo profile list                          # List configuration profiles
+  fargo profile new myprofile                 # Create custom profile
+
+  # Advanced Usage
+  fargo -v build                              # Build with verbose output
+  fargo -p release build                      # Use 'release' profile
+  fargo -p clang build                        # Use custom profile (e.g., clang++)
 
 Version: {__version__}
 """
